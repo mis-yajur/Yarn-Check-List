@@ -1,16 +1,12 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
-  ArrowRight,
   Building2,
-  CheckCircle2,
   Eye,
   EyeOff,
   KeyRound,
   Lock,
   LogIn,
-  ShieldCheck,
-  Sparkles,
   User,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
@@ -37,20 +33,6 @@ export const LoginPage: React.FC = () => {
         setError(res.message || 'Login failed. Please check credentials.');
       }
     }, 300);
-  };
-
-  const handleQuickLogin = (id: string, pass: string) => {
-    setLoginId(id);
-    setPassword(pass);
-    setError(null);
-    setLoading(true);
-    setTimeout(() => {
-      const res = login(id, pass);
-      setLoading(false);
-      if (!res.success) {
-        setError(res.message || 'Login failed.');
-      }
-    }, 200);
   };
 
   return (
@@ -162,49 +144,6 @@ export const LoginPage: React.FC = () => {
               {loading ? 'Authenticating...' : 'Sign In to Task Management System'}
             </button>
           </form>
-
-          {/* Quick Demo Access Bar */}
-          <div className="border-t border-slate-100 pt-4">
-            <div className="flex items-center justify-between mb-2.5">
-              <p className="text-[11px] font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1">
-                <Sparkles className="h-3.5 w-3.5 text-amber-500" />
-                Instant 1-Click Demonstration Access
-              </p>
-            </div>
-            <div className="grid grid-cols-2 gap-2.5">
-              <button
-                type="button"
-                id="btn-demo-admin-login"
-                onClick={() => handleQuickLogin('admin', 'Admin@1234')}
-                className="flex flex-col items-center justify-center rounded-xl border-2 border-rose-100 bg-rose-50/50 p-2.5 text-center hover:border-rose-400 hover:bg-rose-50 transition-all cursor-pointer shadow-2xs group"
-              >
-                <div className="flex items-center gap-1 text-xs font-bold text-rose-900 group-hover:text-rose-700">
-                  <ShieldCheck className="h-3.5 w-3.5 text-rose-700" />
-                  <span>Admin Portal</span>
-                </div>
-                <span className="text-[10px] text-slate-600 font-mono mt-0.5">admin / Admin@1234</span>
-                <span className="text-[9px] font-bold text-rose-700 mt-1 flex items-center gap-0.5">
-                  Click to Enter &rarr;
-                </span>
-              </button>
-
-              <button
-                type="button"
-                id="btn-demo-doer-login"
-                onClick={() => handleQuickLogin('swapan', 'User@1234')}
-                className="flex flex-col items-center justify-center rounded-xl border-2 border-pink-100 bg-pink-50/40 p-2.5 text-center hover:border-pink-400 hover:bg-pink-50 transition-all cursor-pointer shadow-2xs group"
-              >
-                <div className="flex items-center gap-1 text-xs font-bold text-pink-900 group-hover:text-pink-700">
-                  <User className="h-3.5 w-3.5 text-pink-700" />
-                  <span>Doer Portal</span>
-                </div>
-                <span className="text-[10px] text-slate-600 font-mono mt-0.5">swapan / User@1234</span>
-                <span className="text-[9px] font-bold text-pink-700 mt-1 flex items-center gap-0.5">
-                  Click to Enter &rarr;
-                </span>
-              </button>
-            </div>
-          </div>
         </div>
 
         {/* Footer */}

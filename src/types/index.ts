@@ -186,25 +186,6 @@ export interface RatingThresholds {
   critical: number;  // below 60
 }
 
-export interface FirebaseCredentials {
-  apiKey: string;
-  authDomain: string;
-  projectId: string;
-  storageBucket: string;
-  messagingSenderId: string;
-  appId: string;
-  measurementId?: string;
-}
-
-export interface FirebaseConnectionStatus {
-  isConnected: boolean;
-  isConfigured: boolean;
-  projectId: string;
-  lastSyncedAt?: string;
-  syncInProgress: boolean;
-  errorMessage?: string;
-}
-
 export interface AppSettings {
   companyName: string;
   divisionName?: string;

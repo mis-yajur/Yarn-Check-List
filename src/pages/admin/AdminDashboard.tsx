@@ -2,13 +2,12 @@ import React, { useState } from 'react';
 import {
   AlertTriangle,
   Award,
+  Building2,
   Calendar,
   CheckCircle,
   Clock,
   Cpu,
   FileSpreadsheet,
-  Flame,
-  Flower2,
   ListTodo,
   PlusCircle,
   ShieldCheck,
@@ -18,26 +17,21 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
-import { getActiveFirebaseCredentials, getLastSyncTime } from '../../services/firebase';
 import { calculateScorecard, getRatingDetails } from '../../services/scoringEngine';
 
 interface AdminDashboardProps {
   onNavigate: (view: string) => void;
   onOpenNewTask: () => void;
-  onOpenFirebase?: () => void;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onNavigate,
   onOpenNewTask,
-  onOpenFirebase,
 }) => {
   const { currentUser } = useAuth();
   const { taskMasters, scheduledTasks, users, departments, todayStr } = useTasks();
 
   const [selectedMonth, setSelectedMonth] = useState('2026-09');
-  const fbCreds = getActiveFirebaseCredentials();
-  const lastSync = getLastSyncTime();
 
   // KPI calculations
   const totalMasters = taskMasters.length;
@@ -65,13 +59,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Top Banner in Lotus Palette */}
+      {/* Top Banner */}
       <div className="flex flex-col gap-3 rounded-2xl border border-rose-200 bg-linear-to-r from-rose-50/70 via-pink-50/40 to-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <span className="flex items-center gap-1 text-xs font-bold text-rose-800 uppercase tracking-wider">
-              <Flower2 className="h-3.5 w-3.5 text-pink-600" />
-              Lotus Management Portal
+              <Building2 className="h-3.5 w-3.5 text-rose-700" />
+              Plant Operations &amp; Maintenance Portal
             </span>
             <span className="text-slate-300">•</span>
             <span className="text-xs text-slate-700">Factory Date: {todayStr}</span>
@@ -86,17 +80,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Quick Action Buttons */}
         <div className="flex flex-wrap items-center gap-2">
-          {onOpenFirebase && (
-            <button
-              onClick={onOpenFirebase}
-              id="btn-admin-open-firebase"
-              className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2 text-xs font-bold text-rose-800 shadow-2xs hover:bg-rose-50 transition-colors"
-            >
-              <Flame className="h-4 w-4 text-amber-500 fill-amber-400" />
-              Firebase Cloud Sync
-            </button>
-          )}
-
           <button
             onClick={onOpenNewTask}
             id="btn-admin-add-task-header"
@@ -122,38 +105,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Firebase Cloud Sync Status Card */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-rose-200 bg-linear-to-r from-rose-900 via-rose-800 to-pink-900 p-4 text-white shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 border border-white/20 text-amber-300 shrink-0">
-            <Flame className="h-6 w-6" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-black uppercase tracking-wider text-rose-200">
-                Firebase Firestore Real-Time Data Store
-              </span>
-              <span className="rounded-full bg-rose-700 px-2 py-0.5 text-[10px] font-bold text-rose-100">
-                Connected
-              </span>
-            </div>
-            <p className="text-xs text-rose-100 mt-0.5">
-              Project ID: <strong className="font-mono text-amber-300">{fbCreds.projectId}</strong> •
-              All 33 machines &amp; maintenance occurrences synced to Firestore collections
-            </p>
-          </div>
-        </div>
-        {onOpenFirebase && (
-          <button
-            onClick={onOpenFirebase}
-            className="rounded-lg bg-white px-3.5 py-1.5 text-xs font-bold text-rose-900 hover:bg-rose-50 transition-colors shadow-xs shrink-0"
-          >
-            Manage Firebase Credentials &rarr;
-          </button>
-        )}
-      </div>
-
-      {/* 8 Primary KPI Metric Cards in Lotus Theme */}
+      {/* 8 Primary KPI Metric Cards */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
         <div
           onClick={() => onNavigate('tasks')}
@@ -256,7 +208,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Analytics & Performance Charts Row */}
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-        {/* On-Time Compliance Meter in Lotus Pink */}
+        {/* On-Time Compliance Meter */}
         <div className="rounded-xl border border-rose-100 bg-white p-5 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div>

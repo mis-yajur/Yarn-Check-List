@@ -11,8 +11,6 @@ import {
   Cpu,
   FileSpreadsheet,
   FileText,
-  Flame,
-  Flower2,
   History,
   LayoutDashboard,
   ListTodo,
@@ -29,7 +27,6 @@ interface SidebarProps {
   isOpenMobile?: boolean;
   onClose?: () => void;
   onCloseMobile?: () => void;
-  onOpenFirebase: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -39,7 +36,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpenMobile,
   onClose,
   onCloseMobile,
-  onOpenFirebase,
 }) => {
   const showMobile = isOpen ?? isOpenMobile ?? false;
   const handleClose = onClose || onCloseMobile || (() => {});
@@ -123,20 +119,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
         />
       )}
 
-      {/* Sidebar Content - Bright Lotus Executive Theme */}
+      {/* Sidebar Content - Corporate Theme */}
       <aside
         className={`fixed top-16 bottom-0 left-0 z-40 w-64 border-r border-rose-200/90 bg-white text-slate-800 transition-transform duration-200 ease-in-out lg:translate-x-0 ${
           showMobile ? 'translate-x-0' : '-translate-x-full'
         } flex flex-col shadow-sm`}
       >
-        {/* Department Banner in Sidebar with Lotus Pink branding */}
+        {/* Department Banner in Sidebar */}
         <div className="border-b border-rose-100 px-4 py-3 bg-linear-to-r from-rose-50 via-pink-50/50 to-rose-50/80">
           <div className="flex items-center gap-2">
             <div className="flex h-5 w-5 items-center justify-center rounded-md bg-rose-600 text-white shadow-2xs">
-              <Flower2 className="h-3.5 w-3.5" />
+              <Building2 className="h-3.5 w-3.5" />
             </div>
             <p className="text-[11px] font-bold tracking-wider text-rose-900 uppercase">
-              Lotus Theme • Yarn Plant
+              Yarn Plant Operations
             </p>
           </div>
           <p className="text-xs font-black text-slate-900 mt-1">Yajur Fibres Limited</p>
@@ -192,33 +188,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </button>
             );
           })}
-
-          {/* Firebase Quick Button in sidebar */}
-          <div className="pt-2">
-            <button
-              onClick={() => {
-                onOpenFirebase();
-                handleClose();
-              }}
-              className="flex w-full items-center justify-between rounded-xl border border-rose-200 bg-linear-to-r from-rose-50 to-pink-50 px-3 py-2 text-xs font-bold text-rose-900 hover:bg-rose-100 hover:border-rose-300 transition-colors shadow-2xs cursor-pointer"
-            >
-              <div className="flex items-center gap-2">
-                <Flame className="h-4 w-4 text-amber-500 fill-amber-400" />
-                <span>Firebase Cloud Sync</span>
-              </div>
-              <span className="rounded-full bg-rose-200/80 px-2 py-0.5 text-[9px] font-bold text-rose-900 border border-rose-300">
-                Connected
-              </span>
-            </button>
-          </div>
         </nav>
 
         {/* Footer info in sidebar */}
         <div className="border-t border-rose-100 p-3.5 bg-slate-50/80">
           <div className="flex items-center justify-between text-xs text-slate-600">
             <span className="flex items-center gap-1.5 font-medium">
-              <Flower2 className="h-3.5 w-3.5 text-rose-700" />
-              Lotus Edition v2.4
+              <Building2 className="h-3.5 w-3.5 text-rose-700" />
+              Task Management v2.4
             </span>
             <span className="text-rose-700 font-bold flex items-center gap-1 text-[11px]">
               <span className="h-2 w-2 rounded-full bg-rose-600 animate-pulse" />

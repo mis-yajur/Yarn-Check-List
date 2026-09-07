@@ -447,7 +447,7 @@ class StorageManager {
     this.setItem('settings', settings);
   }
 
-  // Bulk Load/Save for Firebase Sync
+  // Bulk Data Export/Import
   loadAllData() {
     return {
       taskMasters: this.getTaskMasters(),

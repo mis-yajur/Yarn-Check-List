@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Flower2 } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { Header } from './components/layout/Header';
 import { Sidebar } from './components/layout/Sidebar';
 import { BulkImportModal } from './components/modals/BulkImportModal';
 import { ChangePasswordModal } from './components/modals/ChangePasswordModal';
-import { FirebaseModal } from './components/modals/FirebaseModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TaskProvider, useTasks } from './context/TaskContext';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
@@ -27,9 +26,12 @@ const MainLayout: React.FC = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [isBulkImportOpen, setIsBulkImportOpen] = useState(false);
-  const [isFirebaseOpen, setIsFirebaseOpen] = useState(false);
   const [theme, setTheme] = useState<string>(() => {
-    return localStorage.getItem('yfl_app_theme') || 'lotus-rose';
+    const saved = localStorage.getItem('yfl_app_theme');
+    if (saved === 'vibrant-rose' || saved === 'yarn-classic') {
+      return saved;
+    }
+    return 'corporate-rose';
   });
 
   const handleThemeChange = (newTheme: string) => {
@@ -41,14 +43,14 @@ const MainLayout: React.FC = () => {
     return (
       <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-rose-50 to-pink-50 text-slate-900">
         <div className="flex flex-col items-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-rose-700 via-rose-800 to-pink-700 text-white shadow-xl animate-pulse">
-            <Flower2 className="h-8 w-8" />
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-linear-to-br from-rose-700 via-rose-800 to-pink-700 text-white shadow-xl">
+            <Building2 className="h-8 w-8" />
           </div>
           <p className="text-sm font-black tracking-tight text-rose-950">
             YAJUR FIBRES LIMITED
           </p>
           <p className="text-xs font-bold text-rose-800">
-            Loading Lotus Task Management System...
+            Loading Task Management System...
           </p>
         </div>
       </div>
@@ -66,7 +68,6 @@ const MainLayout: React.FC = () => {
           <AdminDashboard
             onNavigate={(view) => setCurrentView(view)}
             onOpenNewTask={() => setCurrentView('tasks')}
-            onOpenFirebase={() => setIsFirebaseOpen(true)}
           />
         ) : (
           <UserDashboard onNavigate={(view) => setCurrentView(view)} />
@@ -135,7 +136,6 @@ const MainLayout: React.FC = () => {
           <AdminDashboard
             onNavigate={(view) => setCurrentView(view)}
             onOpenNewTask={() => setCurrentView('tasks')}
-            onOpenFirebase={() => setIsFirebaseOpen(true)}
           />
         ) : (
           <UserDashboard onNavigate={(view) => setCurrentView(view)} />
@@ -144,8 +144,8 @@ const MainLayout: React.FC = () => {
   };
 
   const themeClasses = {
-    'lotus-rose': 'bg-slate-50/90 text-slate-900',
-    'lotus-vibrant': 'bg-rose-50/40 text-slate-900',
+    'corporate-rose': 'bg-slate-50/90 text-slate-900',
+    'vibrant-rose': 'bg-rose-50/40 text-slate-900',
     'yarn-classic': 'bg-slate-100 text-slate-900',
   }[theme] || 'bg-slate-50/90 text-slate-900';
 
@@ -157,7 +157,6 @@ const MainLayout: React.FC = () => {
         onSelectView={(view) => setCurrentView(view)}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
-        onOpenFirebase={() => setIsFirebaseOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -165,7 +164,6 @@ const MainLayout: React.FC = () => {
         <Header
           onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
           onOpenChangePassword={() => setIsChangePasswordOpen(false)}
-          onOpenFirebase={() => setIsFirebaseOpen(true)}
           currentTheme={theme}
           onSelectTheme={handleThemeChange}
         />
@@ -176,13 +174,6 @@ const MainLayout: React.FC = () => {
       </div>
 
       {/* Global Modals */}
-      {isFirebaseOpen && (
-        <FirebaseModal
-          isOpen={isFirebaseOpen}
-          onClose={() => setIsFirebaseOpen(false)}
-        />
-      )}
-
       {isChangePasswordOpen && (
         <ChangePasswordModal onClose={() => setIsChangePasswordOpen(false)} />
       )}

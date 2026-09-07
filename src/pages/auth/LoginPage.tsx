@@ -2,11 +2,10 @@ import React, { useState } from 'react';
 import {
   AlertCircle,
   ArrowRight,
+  Building2,
   CheckCircle2,
   Eye,
   EyeOff,
-  Flame,
-  Flower2,
   KeyRound,
   Lock,
   LogIn,
@@ -57,10 +56,10 @@ export const LoginPage: React.FC = () => {
   return (
     <div className="flex min-h-screen items-center justify-center bg-linear-to-br from-rose-50 via-slate-50 to-pink-50 p-4 text-slate-900">
       <div className="w-full max-w-md overflow-hidden rounded-2xl border border-rose-200 bg-white shadow-2xl">
-        {/* Top Lotus Branding Section - Rich Lotus Rose Corporate Header */}
+        {/* Top Corporate Branding Section */}
         <div className="bg-linear-to-br from-rose-700 via-rose-800 to-pink-800 p-8 text-center text-white shadow-inner">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white/15 backdrop-blur-md text-white shadow-lg ring-4 ring-white/20">
-            <Flower2 className="h-9 w-9 text-pink-200 animate-pulse" />
+            <Building2 className="h-9 w-9 text-rose-100" />
           </div>
 
           <h1 className="mt-4 text-xl font-black tracking-tight sm:text-2xl text-white">
@@ -68,7 +67,7 @@ export const LoginPage: React.FC = () => {
           </h1>
           <div className="mt-1 flex items-center justify-center gap-1.5">
             <span className="rounded-full bg-white/20 px-3 py-0.5 text-[11px] font-bold text-rose-100 border border-white/25">
-              LOTUS EDITION • YARN DIVISION
+              YARN DIVISION • PLANT OPERATIONS
             </span>
           </div>
           <p className="mt-2 text-xs font-medium text-rose-100/90 max-w-xs mx-auto">
@@ -148,9 +147,8 @@ export const LoginPage: React.FC = () => {
                 />
                 <span>Remember Session</span>
               </label>
-              <span className="text-[11px] font-semibold text-rose-700 flex items-center gap-1">
-                <Flame className="h-3 w-3 text-amber-500" />
-                Firestore Real-Time
+              <span className="text-[11px] font-medium text-slate-500">
+                Secure Enterprise Portal
               </span>
             </div>
 
@@ -161,7 +159,7 @@ export const LoginPage: React.FC = () => {
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-rose-700 via-rose-800 to-pink-700 px-4 py-3 text-xs font-bold text-white shadow-md shadow-rose-900/20 hover:from-rose-800 hover:to-pink-800 disabled:opacity-50 transition-all cursor-pointer"
             >
               <LogIn className="h-4 w-4" />
-              {loading ? 'Authenticating...' : 'Sign In to Lotus Task System'}
+              {loading ? 'Authenticating...' : 'Sign In to Task Management System'}
             </button>
           </form>
 
@@ -211,7 +209,7 @@ export const LoginPage: React.FC = () => {
 
         {/* Footer */}
         <div className="border-t border-slate-100 bg-slate-50/80 px-6 py-3 text-center text-xs text-slate-600 flex items-center justify-center gap-1.5 font-medium">
-          <Flower2 className="h-3.5 w-3.5 text-rose-700" />
+          <Building2 className="h-3.5 w-3.5 text-rose-700" />
           <span>Yajur Fibres Limited • Plan • Maintain • Track • Improve</span>
         </div>
       </div>

@@ -82,11 +82,22 @@ interface TaskContextType {
   // Bulk Import
   bulkImportTasks: (rows: Array<Partial<TaskMaster>>) => { success: boolean; importedCount: number; errors: string[] };
 
-  // Refresh
+  // Refresh & Reset
   refreshData: () => void;
+  reloadFromStorage: () => void;
+  setTodayStr: (date: string) => void;
+  clearAllData: () => void;
 }
 
 const TaskContext = createContext<TaskContextType | undefined>(undefined);
+
+const getLiveDateStr = (): string => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = (now.getMonth() + 1).toString().padStart(2, '0');
+  const day = now.getDate().toString().padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { currentUser } = useAuth();
@@ -99,8 +110,15 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
 
-  // Simulation factory date (e.g. 2026-09-07)
-  const todayStr = '2026-09-07';
+  // Live real factory date by default
+  const [todayStr, setTodayStrState] = useState<string>(() => {
+    return localStorage.getItem('yfl_simulated_date') || getLiveDateStr();
+  });
+
+  const setTodayStr = (newDate: string) => {
+    localStorage.setItem('yfl_simulated_date', newDate);
+    setTodayStrState(newDate);
+  };
 
   const loadAll = () => {
     setTaskMasters(storage.getTaskMasters());
@@ -111,6 +129,11 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSettings(storage.getSettings());
     setNotifications(storage.getNotifications());
     setAuditLogs(storage.getAuditLogs());
+  };
+
+  const clearAllData = () => {
+    storage.clearAllTaskData();
+    loadAll();
   };
 
   useEffect(() => {
@@ -854,6 +877,9 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
         markAllNotificationsAsRead,
         bulkImportTasks,
         refreshData,
+        reloadFromStorage: loadAll,
+        setTodayStr,
+        clearAllData,
       }}
     >
       {children}

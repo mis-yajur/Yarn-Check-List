@@ -116,7 +116,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <ListTodo className="h-4 w-4 text-rose-600" />
           </div>
           <p className="mt-2 text-2xl font-black text-rose-950">{totalMasters}</p>
-          <span className="text-[10px] text-slate-600">33 active machines</span>
+          <span className="text-[10px] text-slate-600">{totalMasters} active machines</span>
         </div>
 
         <div
@@ -273,59 +273,48 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <h2 className="text-sm font-bold text-slate-900">Machine Group Distribution</h2>
               <p className="text-[11px] text-slate-600">Yarn Division equipment categories</p>
             </div>
-            <span className="text-xs text-rose-800 font-bold">33 Machines</span>
+            <span className="text-xs text-rose-800 font-bold">{totalMasters} Machines</span>
           </div>
 
           <div className="mt-4 space-y-3">
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>Comber Machines (COMBER 1-13)</span>
-                <span className="font-mono text-rose-800">13 units (39%)</span>
+            {totalMasters === 0 ? (
+              <div className="py-8 text-center text-xs text-slate-500">
+                <p>No machine task masters registered yet.</p>
+                <button
+                  onClick={onOpenNewTask}
+                  className="mt-2 text-xs font-bold text-rose-700 hover:underline"
+                >
+                  + Add First Task Master
+                </button>
               </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-rose-700 rounded-full" style={{ width: '39%' }} />
-              </div>
-            </div>
+            ) : (
+              // Dynamic category grouping
+              Array.from(
+                taskMasters.reduce((acc, tm) => {
+                  const cat = tm.taskCategory || 'Preventive Maintenance';
+                  acc.set(cat, (acc.get(cat) || 0) + 1);
+                  return acc;
+                }, new Map<string, number>())
+              ).map(([catName, count], idx) => {
+                const percent = Math.round((count / totalMasters) * 100);
+                const colors = ['bg-rose-700', 'bg-pink-600', 'bg-purple-600', 'bg-amber-600', 'bg-blue-600'];
+                const textColors = ['text-rose-800', 'text-pink-700', 'text-purple-700', 'text-amber-700', 'text-blue-700'];
+                const colorClass = colors[idx % colors.length];
+                const textClass = textColors[idx % textColors.length];
 
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>Carding Machines (B. Card &amp; F. Card)</span>
-                <span className="font-mono text-pink-700">5 units (15%)</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-pink-600 rounded-full" style={{ width: '15%' }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>Spinning Machines (Spg 1-5)</span>
-                <span className="font-mono text-purple-700">5 units (15%)</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-purple-600 rounded-full" style={{ width: '15%' }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>Finishing &amp; Polish (Fin &amp; Polish m/c)</span>
-                <span className="font-mono text-amber-700">5 units (15%)</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-amber-600 rounded-full" style={{ width: '15%' }} />
-              </div>
-            </div>
-
-            <div>
-              <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
-                <span>Mono &amp; Punjab Machines</span>
-                <span className="font-mono text-blue-700">5 units (15%)</span>
-              </div>
-              <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
-                <div className="h-full bg-blue-600 rounded-full" style={{ width: '15%' }} />
-              </div>
-            </div>
+                return (
+                  <div key={catName}>
+                    <div className="flex justify-between text-xs font-semibold text-slate-700 mb-1">
+                      <span>{catName}</span>
+                      <span className={`font-mono ${textClass}`}>{count} units ({percent}%)</span>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+                      <div className={`h-full ${colorClass} rounded-full`} style={{ width: `${percent}%` }} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
           </div>
         </div>
 

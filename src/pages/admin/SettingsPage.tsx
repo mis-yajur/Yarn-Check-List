@@ -75,7 +75,7 @@ export const SettingsPage: React.FC = () => {
           className="flex items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3.5 py-2 text-xs font-bold text-red-700 hover:bg-red-50 transition-colors shadow-2xs"
         >
           <RotateCcw className="h-4 w-4" />
-          Reset Factory Sample Data
+          Clear All Tasks (Live Fresh Slate)
         </button>
       </div>
 

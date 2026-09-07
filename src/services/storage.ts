@@ -117,21 +117,144 @@ export const INITIAL_SETTINGS: AppSettings = {
   ratingThresholds: DEFAULT_RATING_THRESHOLDS,
 };
 
-// Clean Live Data defaults
+// Live Data injection from Yajur Fibres Limited Yarn Division
+export const RAW_LIVE_TASKS_DATA = [
+  { taskId: 1, taskCode: 'TM-001', name: 'B. Card- 1  Machine Maintaince', category: 'Carding Machines', date: '2026-09-15' },
+  { taskId: 2, taskCode: 'TM-002', name: 'B. Card- 2 Machine Maintaince', category: 'Carding Machines', date: '2026-09-16' },
+  { taskId: 3, taskCode: 'TM-003', name: 'F. Card- 1 Machine Maintaince', category: 'Carding Machines', date: '2026-09-17' },
+  { taskId: 4, taskCode: 'TM-004', name: 'F. Card- 2 Machine Maintaince', category: 'Carding Machines', date: '2026-09-18' },
+  { taskId: 5, taskCode: 'TM-005', name: 'F. Card- 3 Machine Maintaince', category: 'Carding Machines', date: '2026-09-19' },
+  { taskId: 6, taskCode: 'TM-006', name: 'Mono- 1 Machine Maintaince', category: 'Mono Machines', date: '2026-09-20' },
+  { taskId: 7, taskCode: 'TM-007', name: 'Mono- 2 Machine Maintaince', category: 'Mono Machines', date: '2026-09-21' },
+  { taskId: 8, taskCode: 'TM-008', name: 'Mono- 3 Machine Maintaince', category: 'Mono Machines', date: '2026-09-22' },
+  { taskId: 9, taskCode: 'TM-009', name: 'Punjab- 1 Machine Maintaince', category: 'Punjab Machines', date: '2026-09-23' },
+  { taskId: 10, taskCode: 'TM-010', name: 'Punjab- 2 Machine Maintaince', category: 'Punjab Machines', date: '2026-09-24' },
+  { taskId: 11, taskCode: 'TM-011', name: 'Fin- 2 Machine Maintaince', category: 'Finishing Machines', date: '2026-09-25' },
+  { taskId: 12, taskCode: 'TM-012', name: 'Fin- 3 Machine Maintaince', category: 'Finishing Machines', date: '2026-09-26' },
+  { taskId: 13, taskCode: 'TM-013', name: 'Spg- 1 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-27' },
+  { taskId: 14, taskCode: 'TM-014', name: 'Spg- 2 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-28' },
+  { taskId: 15, taskCode: 'TM-015', name: 'Spg- 3 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-29' },
+  { taskId: 16, taskCode: 'TM-016', name: 'Spg- 4 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-30' },
+  { taskId: 17, taskCode: 'TM-017', name: 'Spg- 5 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-30' },
+  { taskId: 18, taskCode: 'TM-018', name: 'Polish m/c- 1 Machine Maintaince', category: 'Polish Machines', date: '2026-10-01' },
+  { taskId: 19, taskCode: 'TM-019', name: 'Polish m/c- 2 Machine Maintaince', category: 'Polish Machines', date: '2026-10-02' },
+  { taskId: 20, taskCode: 'TM-020', name: 'Polish m/c- 3 Machine Maintaince', category: 'Polish Machines', date: '2026-10-03' },
+  { taskId: 21, taskCode: 'TM-021', name: 'COMBER- 1 Machine Maintaince', category: 'Comber Machines', date: '2026-09-15' },
+  { taskId: 22, taskCode: 'TM-022', name: 'COMBER- 2 Machine Maintaince', category: 'Comber Machines', date: '2026-09-16' },
+  { taskId: 23, taskCode: 'TM-023', name: 'COMBER- 3 Machine Maintaince', category: 'Comber Machines', date: '2026-09-17' },
+  { taskId: 24, taskCode: 'TM-024', name: 'COMBER- 4 Machine Maintaince', category: 'Comber Machines', date: '2026-09-18' },
+  { taskId: 25, taskCode: 'TM-025', name: 'COMBER- 5 Machine Maintaince', category: 'Comber Machines', date: '2026-09-19' },
+  { taskId: 26, taskCode: 'TM-026', name: 'COMBER- 6 Machine Maintaince', category: 'Comber Machines', date: '2026-09-20' },
+  { taskId: 27, taskCode: 'TM-027', name: 'COMBER- 7 Machine Maintaince', category: 'Comber Machines', date: '2026-09-21' },
+  { taskId: 28, taskCode: 'TM-028', name: 'COMBER- 8 Machine Maintaince', category: 'Comber Machines', date: '2026-09-22' },
+  { taskId: 29, taskCode: 'TM-029', name: 'COMBER- 9 Machine Maintaince', category: 'Comber Machines', date: '2026-09-23' },
+  { taskId: 30, taskCode: 'TM-030', name: 'COMBER- 10 Machine Maintaince', category: 'Comber Machines', date: '2026-09-24' },
+  { taskId: 31, taskCode: 'TM-031', name: 'COMBER- 11 Machine Maintaince', category: 'Comber Machines', date: '2026-09-25' },
+  { taskId: 32, taskCode: 'TM-032', name: 'COMBER- 12 Machine Maintaince', category: 'Comber Machines', date: '2026-09-26' },
+  { taskId: 33, taskCode: 'TM-033', name: 'COMBER- 13 Machine Maintaince', category: 'Comber Machines', date: '2026-09-27' },
+];
+
 export function generateInitialTaskMasters(): TaskMaster[] {
-  return [];
+  return RAW_LIVE_TASKS_DATA.map((t) => ({
+    id: `tm-${t.taskId}`,
+    taskCode: t.taskCode,
+    taskName: t.name,
+    taskDescription: `15-day scheduled preventive maintenance and mechanical inspection for ${t.name}.`,
+    checklistTemplateId: 'chk-machine-maint',
+    checklistName: 'Machine Maintenance Checklist',
+    assignedUserId: 'user-doer-1',
+    assignedUserName: 'Swapan Kr Ghorai',
+    assignedEmployeeId: 'YFL-084',
+    departmentId: 'dept-yarn-1',
+    departmentName: 'Yarn Division',
+    frequencyType: 'interval_days',
+    frequencyValue: 15,
+    startDate: t.date,
+    priority: 'medium',
+    status: 'active',
+    taskCategory: t.category,
+    createdBy: 'YFL Administrator',
+    createdAt: '2026-09-01T08:00:00Z',
+    updatedAt: '2026-09-01T08:00:00Z',
+  }));
 }
 
 export function generateInitialScheduledTasks(taskMasters: TaskMaster[], advanceDays: number = 5): ScheduledTask[] {
-  return [];
+  const allSchedules: ScheduledTask[] = [];
+
+  taskMasters.forEach((tm) => {
+    const dates = generateScheduleDates(
+      {
+        startDate: tm.startDate,
+        frequencyType: tm.frequencyType,
+        frequencyValue: tm.frequencyValue,
+        weeklyDay: tm.weeklyDay,
+      },
+      { horizonMonths: 12 }
+    );
+
+    dates.forEach((dueDate, index) => {
+      const occurrenceNumber = index + 1;
+      const visDate = calculateVisibilityDate(dueDate, advanceDays);
+
+      allSchedules.push({
+        id: `sch-${tm.id}-${occurrenceNumber}-${dueDate}`,
+        scheduleId: `SCH-${tm.taskCode}-${occurrenceNumber.toString().padStart(3, '0')}`,
+        taskMasterId: tm.id,
+        taskCode: tm.taskCode,
+        taskName: tm.taskName,
+        checklistTemplateId: tm.checklistTemplateId,
+        checklistName: tm.checklistName,
+        assignedUserId: tm.assignedUserId,
+        assignedUserName: tm.assignedUserName,
+        assignedEmployeeId: tm.assignedEmployeeId,
+        departmentId: tm.departmentId,
+        departmentName: tm.departmentName,
+        frequencyType: tm.frequencyType,
+        frequencyValue: tm.frequencyValue,
+        frequencyDisplay: 'Every 15 Days',
+        originalStartDate: tm.startDate,
+        dueDate,
+        visibilityDate: visDate,
+        status: 'future',
+        priority: tm.priority,
+        generatedBy: 'system_init',
+        generatedDate: tm.createdAt,
+      });
+    });
+  });
+
+  return allSchedules;
 }
 
 export function generateInitialNotifications(): NotificationItem[] {
-  return [];
+  return [
+    {
+      id: 'notif-welcome',
+      userId: 'user-admin-1',
+      title: '33 Live Task Masters Injected',
+      message: '33 Yarn Division machines and 1-year schedules (15-day recurrence) have been successfully activated for Swapan Kr Ghorai.',
+      type: 'info',
+      isRead: false,
+      createdAt: '2026-09-07T08:00:00Z',
+    }
+  ];
 }
 
 export function generateInitialAuditLogs(): AuditLog[] {
-  return [];
+  return [
+    {
+      id: 'audit-live-init',
+      action: 'SYSTEM_CONFIG_UPDATED',
+      userId: 'user-admin-1',
+      userName: 'YFL Administrator',
+      role: 'admin',
+      recordType: 'TaskMaster',
+      recordId: 'YFL-YARN-33',
+      reason: 'Injected 33 live Yarn Division machine maintenance task masters with 1-year schedules.',
+      timestamp: '2026-09-07T08:00:00Z',
+    }
+  ];
 }
 
 // Storage Manager
@@ -154,14 +277,21 @@ class StorageManager {
   }
 
   init(): void {
-    // Live data migration check: wipe previous dummy data if present
-    const cleanedFlag = localStorage.getItem(STORAGE_PREFIX + 'live_data_v1');
-    if (!cleanedFlag) {
-      localStorage.removeItem(STORAGE_PREFIX + 'taskMasters');
-      localStorage.removeItem(STORAGE_PREFIX + 'scheduledTasks');
-      localStorage.removeItem(STORAGE_PREFIX + 'notifications');
-      localStorage.removeItem(STORAGE_PREFIX + 'auditLogs');
-      localStorage.setItem(STORAGE_PREFIX + 'live_data_v1', 'true');
+    // Live data injection v3: inject user's exact 33 machines
+    const liveDataV3 = localStorage.getItem(STORAGE_PREFIX + 'live_data_v3');
+    if (!liveDataV3) {
+      const initialMasters = generateInitialTaskMasters();
+      const initialSchedules = generateInitialScheduledTasks(initialMasters, 5);
+      this.setItem('taskMasters', initialMasters);
+      this.setItem('scheduledTasks', initialSchedules);
+      this.setItem('notifications', generateInitialNotifications());
+      this.setItem('auditLogs', generateInitialAuditLogs());
+      this.setItem('departments', [INITIAL_DEPARTMENT]);
+      this.setItem('users', INITIAL_USERS);
+      this.setItem('checklistTemplates', [INITIAL_CHECKLIST_TEMPLATE]);
+      this.setItem('settings', INITIAL_SETTINGS);
+      localStorage.setItem(STORAGE_PREFIX + 'live_data_v3', 'true');
+      return;
     }
 
     if (!localStorage.getItem(STORAGE_PREFIX + 'departments')) {
@@ -177,16 +307,19 @@ class StorageManager {
       this.setItem('settings', INITIAL_SETTINGS);
     }
     if (!localStorage.getItem(STORAGE_PREFIX + 'taskMasters')) {
-      this.setItem('taskMasters', []);
+      const masters = generateInitialTaskMasters();
+      this.setItem('taskMasters', masters);
+      this.setItem('scheduledTasks', generateInitialScheduledTasks(masters, 5));
     }
     if (!localStorage.getItem(STORAGE_PREFIX + 'scheduledTasks')) {
-      this.setItem('scheduledTasks', []);
+      const masters = this.getTaskMasters();
+      this.setItem('scheduledTasks', generateInitialScheduledTasks(masters, 5));
     }
     if (!localStorage.getItem(STORAGE_PREFIX + 'notifications')) {
-      this.setItem('notifications', []);
+      this.setItem('notifications', generateInitialNotifications());
     }
     if (!localStorage.getItem(STORAGE_PREFIX + 'auditLogs')) {
-      this.setItem('auditLogs', []);
+      this.setItem('auditLogs', generateInitialAuditLogs());
     }
   }
 

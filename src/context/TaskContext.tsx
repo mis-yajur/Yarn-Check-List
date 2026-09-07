@@ -65,6 +65,7 @@ interface TaskContextType {
   updateUser: (userId: string, data: Partial<User>) => { success: boolean; message?: string };
   toggleUserStatus: (userId: string) => { success: boolean; status: 'active' | 'suspended'; message?: string };
   resetUserPassword: (userId: string) => { success: boolean; newPass: string; message?: string };
+  deleteUser: (userId: string, reassignToUserId?: string) => { success: boolean; message?: string };
 
   // Department actions
   addDepartment: (data: Omit<Department, 'id' | 'createdAt' | 'updatedAt'>) => { success: boolean; message?: string };
@@ -690,6 +691,88 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true, newPass: tempPassword, message: `Password reset to ${tempPassword}. User must change on next login.` };
   };
 
+  const deleteUser = (userId: string, reassignToUserId?: string) => {
+    if (currentUser?.role !== 'admin') {
+      return { success: false, message: 'Only administrators can delete user accounts.' };
+    }
+    const target = users.find((u) => u.id === userId);
+    if (!target) return { success: false, message: 'User not found.' };
+    if (target.id === currentUser?.id) {
+      return { success: false, message: 'You cannot delete your own logged-in admin account.' };
+    }
+
+    // Check if user has assigned task masters or schedules
+    const assignedMasters = taskMasters.filter((tm) => tm.assignedUserId === userId);
+    const assignedSchedules = scheduledTasks.filter((s) => s.assignedUserId === userId);
+
+    let reassignUser: User | undefined;
+    if (reassignToUserId) {
+      reassignUser = users.find((u) => u.id === reassignToUserId);
+    }
+
+    if (assignedMasters.length > 0 || assignedSchedules.length > 0) {
+      if (reassignUser) {
+        // Reassign task masters
+        const updatedMasters = taskMasters.map((tm) =>
+          tm.assignedUserId === userId
+            ? { ...tm, assignedUserId: reassignUser!.id, assignedUserName: reassignUser!.name, assignedUserEmpId: reassignUser!.employeeId }
+            : tm
+        );
+        storage.saveTaskMasters(updatedMasters);
+        setTaskMasters(updatedMasters);
+
+        // Reassign schedules
+        const updatedSchedules = scheduledTasks.map((s) =>
+          s.assignedUserId === userId
+            ? { ...s, assignedUserId: reassignUser!.id, assignedUserName: reassignUser!.name }
+            : s
+        );
+        storage.saveScheduledTasks(updatedSchedules);
+        setScheduledTasks(updatedSchedules);
+      } else {
+        // Mark as archived in tasks
+        const updatedMasters = taskMasters.map((tm) =>
+          tm.assignedUserId === userId
+            ? { ...tm, assignedUserName: `${target.name} (Archived)` }
+            : tm
+        );
+        storage.saveTaskMasters(updatedMasters);
+        setTaskMasters(updatedMasters);
+
+        const updatedSchedules = scheduledTasks.map((s) =>
+          s.assignedUserId === userId
+            ? { ...s, assignedUserName: `${target.name} (Archived)` }
+            : s
+        );
+        storage.saveScheduledTasks(updatedSchedules);
+        setScheduledTasks(updatedSchedules);
+      }
+    }
+
+    const updatedUsers = users.filter((u) => u.id !== userId);
+    storage.saveUsers(updatedUsers);
+    setUsers(updatedUsers);
+
+    storage.addAuditLog({
+      action: 'USER_DELETED',
+      userId: currentUser?.id || 'admin',
+      userName: currentUser?.name || 'Admin',
+      role: 'admin',
+      recordType: 'User',
+      recordId: target.employeeId,
+      reason: `Permanently deleted user account ${target.name} (${target.employeeId}).${
+        reassignUser ? ` Tasks reassigned to ${reassignUser.name}.` : ''
+      }`,
+    });
+
+    return {
+      success: true,
+      message: `User ${target.name} (${target.employeeId}) deleted successfully.${
+        reassignUser ? ` Tasks transferred to ${reassignUser.name}.` : ''
+      }`,
+    };
+  };
+
   // Departments
   const addDepartment = (data: Omit<Department, 'id' | 'createdAt' | 'updatedAt'>) => {
     const newDept: Department = {
@@ -868,6 +951,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateUser,
         toggleUserStatus,
         resetUserPassword,
+        deleteUser,
         addDepartment,
         updateDepartment,
         saveChecklistTemplate,

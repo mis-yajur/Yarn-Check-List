@@ -10,11 +10,13 @@ import {
   Save,
   Shield,
   Sliders,
+  Sparkles,
 } from 'lucide-react';
 import { useTasks } from '../../context/TaskContext';
+import { generateInitialTaskMasters, generateInitialScheduledTasks, storage } from '../../services/storage';
 
 export const SettingsPage: React.FC = () => {
-  const { settings, updateSettings, todayStr, setTodayStr, reloadFromStorage } = useTasks();
+  const { settings, updateSettings, todayStr, setTodayStr, reloadFromStorage, clearAllData } = useTasks();
 
   const [formData, setFormData] = useState({
     companyName: settings.companyName,
@@ -43,11 +45,23 @@ export const SettingsPage: React.FC = () => {
     setTimeout(() => setSuccessMsg(null), 4000);
   };
 
-  const handleResetDefaults = () => {
-    if (confirm('Reset system settings to Yajur Fibres Limited factory defaults?')) {
-      localStorage.clear();
+  const handleClearAll = () => {
+    if (confirm('Are you sure you want to clear all tasks and start with an empty slate?')) {
+      clearAllData();
+      setSuccessMsg('All tasks cleared successfully.');
+      setTimeout(() => setSuccessMsg(null), 4000);
+    }
+  };
+
+  const handleRestoreLive33 = () => {
+    if (confirm('Load/Restore the 33 live Yarn Division machines and 1-year schedules?')) {
+      const masters = generateInitialTaskMasters();
+      const schedules = generateInitialScheduledTasks(masters, settings.taskAdvanceVisibilityDays || 5);
+      storage.saveTaskMasters(masters);
+      storage.saveScheduledTasks(schedules);
       reloadFromStorage();
-      window.location.reload();
+      setSuccessMsg('Successfully loaded 33 live Yarn Division machines and 1-year recurring maintenance schedules.');
+      setTimeout(() => setSuccessMsg(null), 4000);
     }
   };
 
@@ -70,13 +84,22 @@ export const SettingsPage: React.FC = () => {
           </p>
         </div>
 
-        <button
-          onClick={handleResetDefaults}
-          className="flex items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3.5 py-2 text-xs font-bold text-red-700 hover:bg-red-50 transition-colors shadow-2xs"
-        >
-          <RotateCcw className="h-4 w-4" />
-          Clear All Tasks (Live Fresh Slate)
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={handleRestoreLive33}
+            className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-xs font-bold text-emerald-800 hover:bg-emerald-100 transition-colors shadow-2xs"
+          >
+            <Sparkles className="h-4 w-4 text-emerald-700" />
+            Load 33 Live Machines
+          </button>
+          <button
+            onClick={handleClearAll}
+            className="flex items-center gap-1.5 rounded-xl border border-red-300 bg-white px-3.5 py-2 text-xs font-bold text-red-700 hover:bg-red-50 transition-colors shadow-2xs"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Clear All Tasks
+          </button>
+        </div>
       </div>
 
       {successMsg && (

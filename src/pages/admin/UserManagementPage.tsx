@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  AlertTriangle,
   CheckCircle,
   Edit2,
   KeyRound,
@@ -18,7 +19,7 @@ import { User, UserRole } from '../../types';
 
 export const UserManagementPage: React.FC = () => {
   const { currentUser } = useAuth();
-  const { users, departments, addUser, updateUser, toggleUserStatus, resetUserPassword, scheduledTasks } = useTasks();
+  const { users, departments, addUser, updateUser, toggleUserStatus, resetUserPassword, deleteUser, scheduledTasks, taskMasters } = useTasks();
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
@@ -26,6 +27,10 @@ export const UserManagementPage: React.FC = () => {
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [userToDelete, setUserToDelete] = useState<User | null>(null);
+  const [reassignTargetId, setReassignTargetId] = useState<string>('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const [formData, setFormData] = useState({
     employeeId: '',
     name: '',
@@ -82,6 +87,24 @@ export const UserManagementPage: React.FC = () => {
     });
     setFormError(null);
     setIsModalOpen(true);
+  };
+
+  const handleOpenDelete = (u: User) => {
+    setUserToDelete(u);
+    const otherUsers = users.filter((o) => o.id !== u.id && o.status === 'active');
+    setReassignTargetId(otherUsers[0]?.id || '');
+    setDeleteError(null);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!userToDelete) return;
+    const res = deleteUser(userToDelete.id, reassignTargetId || undefined);
+    if (res.success) {
+      setResetSuccessMessage(res.message || `User ${userToDelete.name} deleted.`);
+      setUserToDelete(null);
+    } else {
+      setDeleteError(res.message || 'Failed to delete user.');
+    }
   };
 
   const handleFormSubmit = (e: React.FormEvent) => {
@@ -224,6 +247,7 @@ export const UserManagementPage: React.FC = () => {
             <tbody className="divide-y divide-slate-100">
               {filteredUsers.map((user) => {
                 const assignedCount = scheduledTasks.filter((s) => s.assignedUserId === user.id).length;
+                const assignedMasterCount = taskMasters.filter((tm) => tm.assignedUserId === user.id).length;
 
                 return (
                   <tr key={user.id} className="hover:bg-slate-50/70 transition-colors">
@@ -253,7 +277,11 @@ export const UserManagementPage: React.FC = () => {
                       </span>
                     </td>
                     <td className="p-3 font-bold text-slate-900">
-                      {assignedCount} tasks
+                      {assignedMasterCount > 0 ? (
+                        <span>{assignedMasterCount} masters ({assignedCount} sch)</span>
+                      ) : (
+                        <span>{assignedCount} tasks</span>
+                      )}
                     </td>
                     <td className="p-3">
                       <span
@@ -286,10 +314,20 @@ export const UserManagementPage: React.FC = () => {
                           onClick={() => toggleUserStatus(user.id)}
                           title={user.status === 'active' ? 'Deactivate' : 'Activate'}
                           className={`rounded p-1.5 ${
-                            user.status === 'active' ? 'text-red-600 hover:bg-red-50' : 'text-green-600 hover:bg-green-50'
+                            user.status === 'active' ? 'text-amber-600 hover:bg-amber-50' : 'text-green-600 hover:bg-green-50'
                           }`}
                         >
                           {user.status === 'active' ? <UserX className="h-4 w-4" /> : <UserCheck className="h-4 w-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleOpenDelete(user)}
+                          title={user.id === currentUser?.id ? 'Cannot delete current logged-in user' : 'Delete User Permanently'}
+                          disabled={user.id === currentUser?.id}
+                          className={`rounded p-1.5 ${
+                            user.id === currentUser?.id ? 'text-slate-300 cursor-not-allowed' : 'text-red-600 hover:bg-red-50 hover:text-red-800'
+                          }`}
+                        >
+                          <Trash2 className="h-4 w-4" />
                         </button>
                       </div>
                     </td>
@@ -300,6 +338,83 @@ export const UserManagementPage: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Delete User Confirmation Modal */}
+      {userToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="w-full max-w-md rounded-xl border border-red-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-red-100 pb-3">
+              <div className="flex items-center gap-2 text-red-700">
+                <AlertTriangle className="h-5 w-5" />
+                <h3 className="text-base font-bold text-slate-900">Confirm User Deletion</h3>
+              </div>
+              <button onClick={() => setUserToDelete(null)} className="text-slate-400 hover:text-slate-600">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3 text-xs text-slate-700">
+              <p>
+                Are you sure you want to delete user{' '}
+                <strong className="text-slate-900">{userToDelete.name}</strong> ({userToDelete.employeeId})?
+              </p>
+
+              {deleteError && (
+                <div className="rounded-lg bg-red-50 p-2.5 text-xs text-red-700 font-semibold border border-red-200">
+                  {deleteError}
+                </div>
+              )}
+
+              {taskMasters.filter((tm) => tm.assignedUserId === userToDelete.id).length > 0 && (
+                <div className="rounded-lg bg-amber-50 p-3 border border-amber-200 text-amber-900 space-y-2">
+                  <p className="font-bold">
+                    This user is assigned to {taskMasters.filter((tm) => tm.assignedUserId === userToDelete.id).length} Task Masters.
+                  </p>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-800 mb-1">
+                      Reassign their tasks to:
+                    </label>
+                    <select
+                      value={reassignTargetId}
+                      onChange={(e) => setReassignTargetId(e.target.value)}
+                      className="w-full rounded-md border border-slate-300 bg-white p-2 text-xs text-slate-800"
+                    >
+                      {users
+                        .filter((u) => u.id !== userToDelete.id)
+                        .map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.employeeId} - {u.designation})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] text-slate-500">
+                This action will permanently remove the login credentials from the system.
+              </p>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-4 mt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setUserToDelete(null)}
+                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                className="rounded-lg bg-red-600 px-4 py-1.5 text-xs font-bold text-white hover:bg-red-700 transition-colors shadow-xs"
+              >
+                Delete User
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Add / Edit Modal */}
       {isModalOpen && (

@@ -17,6 +17,7 @@ import {
   Settings,
   Users,
 } from 'lucide-react';
+import { addDays, format, parseISO } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
 
@@ -42,6 +43,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const { currentUser, isAdmin } = useAuth();
   const { scheduledTasks, todayStr } = useTasks();
 
+  const fiveDaysLaterStr = (() => {
+    try {
+      return format(addDays(parseISO(todayStr), 5), 'yyyy-MM-dd');
+    } catch {
+      return todayStr;
+    }
+  })();
+
   // Compute live badges
   const userTasks = isAdmin
     ? scheduledTasks
@@ -53,6 +62,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const overdueCount = userTasks.filter(
     (s) => s.dueDate < todayStr && !s.status.startsWith('completed')
   ).length;
+
+  const upcomingCount = userTasks.filter((task) => {
+    const isTodayOrNext5Days = task.dueDate >= todayStr && task.dueDate <= fiveDaysLaterStr;
+    const isPreviousPending = task.dueDate < todayStr && !task.status.startsWith('completed') && task.status !== 'cancelled';
+    return isTodayOrNext5Days || isPreviousPending;
+  }).length;
 
   const adminNav = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -67,7 +82,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
       badge: dueTodayCount > 0 ? dueTodayCount : undefined,
       badgeColor: 'bg-amber-100 text-amber-800 border border-amber-300 font-bold',
     },
-    { id: 'upcoming', label: 'Upcoming Tasks', icon: CalendarDays },
+    {
+      id: 'upcoming',
+      label: 'Upcoming Tasks',
+      icon: CalendarDays,
+      badge: upcomingCount > 0 ? upcomingCount : undefined,
+      badgeColor: 'bg-indigo-100 text-indigo-800 border border-indigo-300 font-bold',
+    },
     {
       id: 'overdue',
       label: 'Overdue Tasks',
@@ -90,8 +111,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'dashboard', label: 'My Dashboard', icon: LayoutDashboard },
     {
       id: 'my-tasks',
-      label: 'My Tasks (Next 5 Days)',
+      label: 'My Active Tasks',
       icon: ListTodo,
+      badge: upcomingCount > 0 ? upcomingCount : undefined,
+      badgeColor: 'bg-indigo-100 text-indigo-800 border border-indigo-300 font-bold',
+    },
+    {
+      id: 'due-today',
+      label: "Today's Tasks",
+      icon: Clock,
       badge: dueTodayCount > 0 ? dueTodayCount : undefined,
       badgeColor: 'bg-amber-100 text-amber-800 border border-amber-300 font-bold',
     },

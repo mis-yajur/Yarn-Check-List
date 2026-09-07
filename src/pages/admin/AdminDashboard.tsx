@@ -15,6 +15,7 @@ import {
   UserCheck,
   Users,
 } from 'lucide-react';
+import { addDays, format, parseISO } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
 import { calculateScorecard, getRatingDetails } from '../../services/scoringEngine';
@@ -33,15 +34,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [selectedMonth, setSelectedMonth] = useState('2026-09');
 
+  const fiveDaysLaterStr = (() => {
+    try {
+      return format(addDays(parseISO(todayStr), 5), 'yyyy-MM-dd');
+    } catch {
+      return todayStr;
+    }
+  })();
+
   // KPI calculations
   const totalMasters = taskMasters.length;
   const totalSchedules = scheduledTasks.length;
   const dueTodayTasks = scheduledTasks.filter(
     (s) => (s.status === 'due_today' || s.dueDate === todayStr) && !s.status.startsWith('completed')
   );
-  const upcomingTasks = scheduledTasks.filter(
-    (s) => !s.status.startsWith('completed') && s.dueDate >= todayStr
-  );
+  const upcomingTasks = scheduledTasks.filter((s) => {
+    const isTodayOrNext5Days = s.dueDate >= todayStr && s.dueDate <= fiveDaysLaterStr;
+    const isPreviousPending = s.dueDate < todayStr && !s.status.startsWith('completed') && s.status !== 'cancelled';
+    return isTodayOrNext5Days || isPreviousPending;
+  });
   const completedTasks = scheduledTasks.filter((s) => s.status.startsWith('completed'));
   const overdueTasks = scheduledTasks.filter(
     (s) => s.dueDate < todayStr && !s.status.startsWith('completed')
@@ -158,7 +169,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <Calendar className="h-4 w-4 text-slate-400" />
           </div>
           <p className="mt-2 text-2xl font-black text-slate-900">{upcomingTasks.length}</p>
-          <span className="text-[10px] text-slate-600">Next cycles</span>
+          <span className="text-[10px] text-slate-600">Today + 5d &amp; Pending</span>
         </div>
 
         <div

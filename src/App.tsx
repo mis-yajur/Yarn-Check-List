@@ -95,8 +95,8 @@ const MainLayout: React.FC = () => {
         return isAdmin ? (
           <MasterSchedulePage
             initialFilter="upcoming"
-            title="Upcoming Maintenance Tasks"
-            subtitle="Scheduled preventive machine maintenance tasks upcoming in the active horizon."
+            title="Upcoming & Pending Maintenance Tasks"
+            subtitle="Showing Today's tasks + next 5 days upcoming tasks + all previous pending/overdue maintenance tasks."
           />
         ) : (
           <MyTasksPage filterType="upcoming" />

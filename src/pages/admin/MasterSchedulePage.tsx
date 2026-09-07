@@ -103,6 +103,14 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
     return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
   }, [scheduledTasks]);
 
+  const fiveDaysLaterStr = useMemo(() => {
+    try {
+      return format(addDays(parseISO(todayStr), 5), 'yyyy-MM-dd');
+    } catch {
+      return todayStr;
+    }
+  }, [todayStr]);
+
   // Filter paired rows
   const filteredPairedRows = useMemo(() => {
     return pairedDailyRows.filter((row) => {
@@ -128,22 +136,30 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
 
         if (statusFilter === 'due_today') {
           if (row.date !== todayStr) return false;
+        } else if (statusFilter === 'upcoming') {
+          // Today + upcoming 5 days task AND Previous all Pending Task
+          const isTodayOrNext5Days = row.date >= todayStr && row.date <= fiveDaysLaterStr;
+          const isPreviousPending =
+            row.date < todayStr &&
+            ((row.mc1 && !row.mc1.status.startsWith('completed') && row.mc1.status !== 'cancelled') ||
+              (row.mc2 && !row.mc2.status.startsWith('completed') && row.mc2.status !== 'cancelled'));
+          if (!isTodayOrNext5Days && !isPreviousPending) return false;
         } else if (statusFilter === 'completed') {
           const hasCompleted = mc1Status?.startsWith('completed') || mc2Status?.startsWith('completed');
           if (!hasCompleted) return false;
         } else if (statusFilter === 'overdue') {
           const hasOverdue = (mc1Status === 'overdue' || mc2Status === 'overdue') ||
-            (row.date < todayStr && (!mc1Status?.startsWith('completed') || (row.mc2 && !mc2Status?.startsWith('completed'))));
+            (row.date < todayStr && ((row.mc1 && !mc1Status?.startsWith('completed')) || (row.mc2 && !mc2Status?.startsWith('completed'))));
           if (!hasOverdue) return false;
         } else if (statusFilter === 'pending') {
-          const hasPending = !mc1Status?.startsWith('completed') || (row.mc2 && !mc2Status?.startsWith('completed'));
+          const hasPending = (row.mc1 && !mc1Status?.startsWith('completed')) || (row.mc2 && !mc2Status?.startsWith('completed'));
           if (!hasPending) return false;
         }
       }
 
       return true;
     });
-  }, [pairedDailyRows, searchQuery, cycleFilter, statusFilter, todayStr]);
+  }, [pairedDailyRows, searchQuery, cycleFilter, statusFilter, todayStr, fiveDaysLaterStr]);
 
   // Filter flat tasks
   const filteredFlatTasks = useMemo(() => {
@@ -163,16 +179,23 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
       if (statusFilter !== 'all') {
         if (statusFilter === 'due_today') {
           if (task.dueDate !== todayStr || task.status.startsWith('completed')) return false;
+        } else if (statusFilter === 'upcoming') {
+          // Today + upcoming 5 days task AND Previous all Pending Task
+          const isTodayOrNext5Days = task.dueDate >= todayStr && task.dueDate <= fiveDaysLaterStr;
+          const isPreviousPending = task.dueDate < todayStr && !task.status.startsWith('completed') && task.status !== 'cancelled';
+          if (!isTodayOrNext5Days && !isPreviousPending) return false;
         } else if (statusFilter === 'completed') {
           if (!task.status.startsWith('completed')) return false;
         } else if (statusFilter === 'overdue') {
           if (task.dueDate >= todayStr || task.status.startsWith('completed')) return false;
+        } else if (statusFilter === 'pending') {
+          if (task.status.startsWith('completed') || task.status === 'cancelled') return false;
         }
       }
 
       return true;
     });
-  }, [scheduledTasks, searchQuery, groupFilter, cycleFilter, statusFilter, todayStr]);
+  }, [scheduledTasks, searchQuery, groupFilter, cycleFilter, statusFilter, todayStr, fiveDaysLaterStr]);
 
   // Metrics
   const totalDays = pairedDailyRows.length;
@@ -180,6 +203,13 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   const completedTasks = scheduledTasks.filter((t) => t.status.startsWith('completed')).length;
   const overdueTasks = scheduledTasks.filter((t) => t.dueDate < todayStr && !t.status.startsWith('completed')).length;
   const todayTasks = scheduledTasks.filter((t) => t.dueDate === todayStr);
+  const upcomingTasksCount = useMemo(() => {
+    return scheduledTasks.filter((task) => {
+      const isTodayOrNext5Days = task.dueDate >= todayStr && task.dueDate <= fiveDaysLaterStr;
+      const isPreviousPending = task.dueDate < todayStr && !task.status.startsWith('completed') && task.status !== 'cancelled';
+      return isTodayOrNext5Days || isPreviousPending;
+    }).length;
+  }, [scheduledTasks, todayStr, fiveDaysLaterStr]);
 
   // Pagination slice
   const totalItems = viewMode === 'paired' ? filteredPairedRows.length : filteredFlatTasks.length;
@@ -328,7 +358,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
           <span className="text-[11px] font-semibold text-slate-500">Total Working Days</span>
           <p className="text-xl font-bold text-slate-900 mt-1">{totalDays}</p>
@@ -341,24 +371,70 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
           <span className="text-[10px] text-blue-600">M/C 1 &amp; M/C 2 combined</span>
         </div>
 
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500">Completed Done</span>
+        <div
+          onClick={() => {
+            setStatusFilter('upcoming');
+            setCurrentPage(1);
+          }}
+          className={`cursor-pointer rounded-xl border p-4 shadow-xs transition-all ${
+            statusFilter === 'upcoming'
+              ? 'border-indigo-500 bg-indigo-50/70 ring-2 ring-indigo-200'
+              : 'border-indigo-200 bg-white hover:border-indigo-400'
+          }`}
+        >
+          <span className="text-[11px] font-bold text-indigo-900">Upcoming + Pending</span>
+          <p className="text-xl font-black text-indigo-700 mt-1">{upcomingTasksCount}</p>
+          <span className="text-[10px] text-indigo-800 font-semibold">Today + 5 Days &amp; Open Pending</span>
+        </div>
+
+        <div
+          onClick={() => {
+            setStatusFilter('due_today');
+            setCurrentPage(1);
+          }}
+          className={`cursor-pointer rounded-xl border p-4 shadow-xs transition-all ${
+            statusFilter === 'due_today'
+              ? 'border-amber-500 bg-amber-50/70 ring-2 ring-amber-200'
+              : 'border-slate-200 bg-white hover:border-amber-400'
+          }`}
+        >
+          <span className="text-[11px] font-semibold text-slate-600">Due Today</span>
+          <p className="text-xl font-bold text-amber-700 mt-1">{todayTasks.length}</p>
+          <span className="text-[10px] text-amber-800 font-mono">{todayStr}</span>
+        </div>
+
+        <div
+          onClick={() => {
+            setStatusFilter('overdue');
+            setCurrentPage(1);
+          }}
+          className={`cursor-pointer rounded-xl border p-4 shadow-xs transition-all ${
+            statusFilter === 'overdue'
+              ? 'border-rose-500 bg-rose-50/70 ring-2 ring-rose-200'
+              : 'border-slate-200 bg-white hover:border-rose-400'
+          }`}
+        >
+          <span className="text-[11px] font-semibold text-slate-600">Overdue Pending</span>
+          <p className="text-xl font-bold text-rose-700 mt-1">{overdueTasks}</p>
+          <span className="text-[10px] text-rose-800 font-semibold">Needs attention</span>
+        </div>
+
+        <div
+          onClick={() => {
+            setStatusFilter('completed');
+            setCurrentPage(1);
+          }}
+          className={`cursor-pointer rounded-xl border p-4 shadow-xs transition-all ${
+            statusFilter === 'completed'
+              ? 'border-emerald-500 bg-emerald-50/70 ring-2 ring-emerald-200'
+              : 'border-slate-200 bg-white hover:border-emerald-400'
+          }`}
+        >
+          <span className="text-[11px] font-semibold text-slate-600">Completed Done</span>
           <p className="text-xl font-bold text-emerald-700 mt-1">{completedTasks}</p>
-          <span className="text-[10px] text-emerald-600">
+          <span className="text-[10px] text-emerald-800">
             {totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}% completion
           </span>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500">Due Today</span>
-          <p className="text-xl font-bold text-indigo-700 mt-1">{todayTasks.length}</p>
-          <span className="text-[10px] text-indigo-600 font-mono">{todayStr}</span>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
-          <span className="text-[11px] font-semibold text-slate-500">Overdue Pending</span>
-          <p className="text-xl font-bold text-rose-700 mt-1">{overdueTasks}</p>
-          <span className="text-[10px] text-rose-600">Needs attention</span>
         </div>
       </div>
 
@@ -390,6 +466,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
               className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
             >
               <option value="all">All Statuses</option>
+              <option value="upcoming">Upcoming (Today + 5 Days &amp; Previous Pending) ({upcomingTasksCount})</option>
               <option value="due_today">Due Today ({todayTasks.length})</option>
               <option value="pending">Pending</option>
               <option value="completed">Completed ({completedTasks})</option>
@@ -450,6 +527,26 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
           </select>
         </div>
       </div>
+
+      {statusFilter === 'upcoming' && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-indigo-200 bg-indigo-50/80 p-3.5 text-xs text-indigo-950 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <Calendar className="h-5 w-5 text-indigo-700 shrink-0" />
+            <div>
+              <span className="font-bold">Upcoming Maintenance Horizon (Today + 5 Days &amp; Previous Open Pending Tasks)</span>
+              <span className="block text-[11px] text-indigo-800 mt-0.5">
+                Displaying scheduled tasks for Today ({todayStr}), upcoming working days through {fiveDaysLaterStr}, plus all previous uncompleted/overdue tasks requiring technical action.
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setStatusFilter('all')}
+            className="rounded-lg border border-indigo-300 bg-white px-3 py-1.5 text-xs font-bold text-indigo-800 hover:bg-indigo-50 transition-colors shrink-0 shadow-2xs"
+          >
+            Show All Dates
+          </button>
+        </div>
+      )}
 
       {/* Main Table Content */}
       <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">

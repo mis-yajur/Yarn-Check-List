@@ -238,39 +238,6 @@ export const SchedulerEnginePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Rotation Structure Blueprint */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-900">Machine Group 1 (M/C 1)</span>
-            <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">17 Machines</span>
-          </div>
-          <p className="text-[11px] text-slate-600">
-            B.Card-1 &rarr; B.Card-2 &rarr; F.Card-1 &rarr; F.Card-2 &rarr; F.Card-3 &rarr; Mono-1 &rarr; Mono-2 &rarr; Mono-3 &rarr; Punjab-1 &rarr; Punjab-2 &rarr; Fin-2 &rarr; Fin-3 &rarr; Spg-1 &rarr; Spg-2 &rarr; Spg-3 &rarr; Spg-4 &rarr; Spg-5
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-900">Machine Group 2 (M/C 2)</span>
-            <span className="rounded bg-purple-100 px-2 py-0.5 text-[10px] font-bold text-purple-800">16 Machines</span>
-          </div>
-          <p className="text-[11px] text-slate-600">
-            COMBER-1 to COMBER-13 &rarr; Polish m/c-1 &rarr; Polish m/c-2 &rarr; Polish m/c-3 (Cycle Day 17 has no M/C 2 task: &lsquo;-&rsquo;)
-          </p>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-900">17-Working-Day Cycle</span>
-            <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">Restarts on Day 18</span>
-          </div>
-          <p className="text-[11px] text-slate-600">
-            Day 17: Spg-5 + &lsquo;-&rsquo;. Next working day immediately restarts at Cycle Day 1 (B.Card-1 + COMBER-1). Non-working days (Sundays/Holidays) are cleanly bypassed.
-          </p>
-        </div>
-      </div>
-
       {/* Live Paired Schedule Preview Table */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs space-y-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-3">

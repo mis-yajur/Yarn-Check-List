@@ -1,9 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Award,
   Calendar,
   CheckCircle,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Clock,
@@ -15,13 +16,16 @@ import {
   LayoutGrid,
   List,
   ListTodo,
+  Play,
+  RotateCcw,
   Search,
+  SlidersHorizontal,
   X,
 } from 'lucide-react';
 import { addDays, format, parseISO } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
-import { ScheduledTask, ScheduleStatus } from '../../types';
+import { DailyScheduleRow, ScheduledTask, ScheduleStatus } from '../../types';
 
 interface MasterSchedulePageProps {
   initialFilter?: string;
@@ -35,20 +39,24 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   subtitle,
 }) => {
   const { currentUser, isAdmin } = useAuth();
-  const { scheduledTasks, departments, users, adminCorrectCompletion, todayStr } = useTasks();
+  const { scheduledTasks, holidays, adminCorrectCompletion, markTaskAsDone, todayStr } = useTasks();
 
-  const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
+  const [viewMode, setViewMode] = useState<'paired' | 'flat'>('paired');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState(initialFilter);
-  const [doerFilter, setDoerFilter] = useState('all');
-  const [monthFilter, setMonthFilter] = useState('all');
+  const [cycleFilter, setCycleFilter] = useState('all');
+  const [groupFilter, setGroupFilter] = useState<'all' | 'MC1' | 'MC2'>('all');
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<ScheduledTask | null>(null);
 
-  // Pagination state: Page-wise entries (100 or 250)
-  const [itemsPerPage, setItemsPerPage] = useState<number>(100);
+  // Completion modal state
+  const [activeCompletingTask, setActiveCompletingTask] = useState<ScheduledTask | null>(null);
+  const [completeRemarks, setCompleteRemarks] = useState('');
+  const [completeObservation, setCompleteObservation] = useState('');
+
+  // Pagination
+  const [itemsPerPage, setItemsPerPage] = useState<number>(50);
   const [currentPage, setCurrentPage] = useState<number>(1);
 
-  // Sync if initialFilter prop changes
   React.useEffect(() => {
     setStatusFilter(initialFilter);
     setCurrentPage(1);
@@ -60,602 +68,529 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   const [correctionStatus, setCorrectionStatus] = useState<ScheduleStatus>('completed_on_time');
   const [correctionScore, setCorrectionScore] = useState<number>(100);
 
-  // Filter tasks: if doer, restricted to their own tasks unless admin
-  const baseTasks = useMemo(() => {
-    return isAdmin
-      ? scheduledTasks
-      : scheduledTasks.filter((s) => s.assignedUserId === currentUser?.id);
-  }, [isAdmin, scheduledTasks, currentUser?.id]);
+  // Group tasks into paired daily rows
+  interface PairedDailyRow {
+    mc1?: ScheduledTask;
+    mc2?: ScheduledTask;
+    date: string;
+    dayName: string;
+    cycleNumber?: number;
+    cycleDay?: number;
+  }
 
-  // Compute Today + 5 days date string for the upcoming filter (Today through Today+5 days)
-  const todayPlus5Str = useMemo(() => {
-    try {
-      const parsedToday = parseISO(todayStr);
-      return format(addDays(parsedToday, 5), 'yyyy-MM-dd');
-    } catch {
-      return todayStr;
-    }
-  }, [todayStr]);
+  const pairedDailyRows = useMemo(() => {
+    const map = new Map<string, PairedDailyRow>();
 
-  // Summary Metrics calculated from the entire dataset (Total Tasks, Due Today, Upcoming 5 Days, Overdue, Completed)
-  const metrics = useMemo(() => {
-    const totalCount = baseTasks.length;
-    const dueTodayCount = baseTasks.filter(
-      (t) => (t.status === 'due_today' || t.dueDate === todayStr) && !t.status.startsWith('completed')
-    ).length;
-    const upcoming5DaysCount = baseTasks.filter(
-      (t) => !t.status.startsWith('completed') && t.dueDate >= todayStr && t.dueDate <= todayPlus5Str
-    ).length;
-    const overdueCount = baseTasks.filter(
-      (t) => t.dueDate < todayStr && !t.status.startsWith('completed')
-    ).length;
-    const completedCount = baseTasks.filter((t) => t.status.startsWith('completed')).length;
+    scheduledTasks.forEach((task) => {
+      const key = task.dueDate;
+      const existing: PairedDailyRow = map.get(key) || {
+        date: task.dueDate,
+        dayName: task.dayName || format(parseISO(task.dueDate), 'EEEE'),
+        cycleNumber: task.cycleNumber || 1,
+        cycleDay: task.cycleDay || 1,
+      };
 
-    return {
-      totalCount,
-      dueTodayCount,
-      upcoming5DaysCount,
-      overdueCount,
-      completedCount,
-    };
-  }, [baseTasks, todayStr, todayPlus5Str]);
+      if (task.rotationGroup === 'MC1') {
+        existing.mc1 = task;
+        existing.cycleNumber = task.cycleNumber;
+        existing.cycleDay = task.cycleDay;
+      } else if (task.rotationGroup === 'MC2') {
+        existing.mc2 = task;
+      }
+      map.set(key, existing);
+    });
 
-  // Filter and sort tasks by due date
-  const filteredTasks = useMemo(() => {
-    const result = baseTasks.filter((task) => {
+    return Array.from(map.values()).sort((a, b) => a.date.localeCompare(b.date));
+  }, [scheduledTasks]);
+
+  // Filter paired rows
+  const filteredPairedRows = useMemo(() => {
+    return pairedDailyRows.filter((row) => {
+      const mc1Name = row.mc1?.taskName || '';
+      const mc2Name = row.mc2?.taskName || '';
+      const search = searchQuery.toLowerCase();
+
       const matchesSearch =
-        task.taskCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        task.taskName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        task.assignedUserName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        task.checklistName.toLowerCase().includes(searchQuery.toLowerCase());
+        row.date.includes(search) ||
+        row.dayName.toLowerCase().includes(search) ||
+        mc1Name.toLowerCase().includes(search) ||
+        mc2Name.toLowerCase().includes(search);
 
       if (!matchesSearch) return false;
 
-      let matchesStatus = true;
-      if (statusFilter === 'all') {
-        matchesStatus = true;
-      } else if (statusFilter === 'due_today') {
-        // Due today strictly
-        matchesStatus = (task.status === 'due_today' || task.dueDate === todayStr) && !task.status.startsWith('completed');
-      } else if (statusFilter === 'upcoming') {
-        // Today + upcoming 5 days task only (non-completed)
-        matchesStatus =
-          !task.status.startsWith('completed') &&
-          task.dueDate >= todayStr &&
-          task.dueDate <= todayPlus5Str;
-      } else if (statusFilter === 'overdue') {
-        // Only if task due date is crossed (past today) and not completed
-        matchesStatus = task.dueDate < todayStr && !task.status.startsWith('completed');
-      } else if (statusFilter === 'available') {
-        // Next 5 days
-        matchesStatus =
-          !task.status.startsWith('completed') &&
-          task.dueDate >= todayStr &&
-          task.dueDate <= todayPlus5Str;
-      } else if (statusFilter === 'done' || statusFilter === 'completed') {
-        matchesStatus = task.status.startsWith('completed');
-      } else if (statusFilter === 'future') {
-        matchesStatus = !task.status.startsWith('completed') && task.dueDate > todayPlus5Str;
-      } else {
-        matchesStatus = task.status === statusFilter;
+      if (cycleFilter !== 'all' && row.cycleNumber !== parseInt(cycleFilter, 10)) {
+        return false;
       }
 
-      const matchesDoer = doerFilter === 'all' || task.assignedUserId === doerFilter;
-      const matchesMonth = monthFilter === 'all' || task.dueDate.startsWith(monthFilter);
+      if (statusFilter !== 'all') {
+        const mc1Status = row.mc1?.status;
+        const mc2Status = row.mc2?.status;
 
-      return matchesStatus && matchesDoer && matchesMonth;
+        if (statusFilter === 'due_today') {
+          if (row.date !== todayStr) return false;
+        } else if (statusFilter === 'completed') {
+          const hasCompleted = mc1Status?.startsWith('completed') || mc2Status?.startsWith('completed');
+          if (!hasCompleted) return false;
+        } else if (statusFilter === 'overdue') {
+          const hasOverdue = (mc1Status === 'overdue' || mc2Status === 'overdue') ||
+            (row.date < todayStr && (!mc1Status?.startsWith('completed') || (row.mc2 && !mc2Status?.startsWith('completed'))));
+          if (!hasOverdue) return false;
+        } else if (statusFilter === 'pending') {
+          const hasPending = !mc1Status?.startsWith('completed') || (row.mc2 && !mc2Status?.startsWith('completed'));
+          if (!hasPending) return false;
+        }
+      }
+
+      return true;
     });
+  }, [pairedDailyRows, searchQuery, cycleFilter, statusFilter, todayStr]);
 
-    // Chronological sort by due date ascending, then schedule ID
-    return result.sort((a, b) => {
-      const cmp = a.dueDate.localeCompare(b.dueDate);
-      if (cmp !== 0) return cmp;
-      return a.scheduleId.localeCompare(b.scheduleId);
+  // Filter flat tasks
+  const filteredFlatTasks = useMemo(() => {
+    return scheduledTasks.filter((task) => {
+      const search = searchQuery.toLowerCase();
+      const matchesSearch =
+        task.taskCode.toLowerCase().includes(search) ||
+        task.taskName.toLowerCase().includes(search) ||
+        task.dueDate.includes(search) ||
+        task.assignedUserName.toLowerCase().includes(search);
+
+      if (!matchesSearch) return false;
+
+      if (groupFilter !== 'all' && task.rotationGroup !== groupFilter) return false;
+      if (cycleFilter !== 'all' && task.cycleNumber !== parseInt(cycleFilter, 10)) return false;
+
+      if (statusFilter !== 'all') {
+        if (statusFilter === 'due_today') {
+          if (task.dueDate !== todayStr || task.status.startsWith('completed')) return false;
+        } else if (statusFilter === 'completed') {
+          if (!task.status.startsWith('completed')) return false;
+        } else if (statusFilter === 'overdue') {
+          if (task.dueDate >= todayStr || task.status.startsWith('completed')) return false;
+        }
+      }
+
+      return true;
     });
-  }, [baseTasks, searchQuery, statusFilter, doerFilter, monthFilter, todayStr, todayPlus5Str]);
+  }, [scheduledTasks, searchQuery, groupFilter, cycleFilter, statusFilter, todayStr]);
 
-  // Reset to page 1 whenever filters change
-  React.useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, statusFilter, doerFilter, monthFilter, itemsPerPage]);
+  // Metrics
+  const totalDays = pairedDailyRows.length;
+  const totalTasks = scheduledTasks.length;
+  const completedTasks = scheduledTasks.filter((t) => t.status.startsWith('completed')).length;
+  const overdueTasks = scheduledTasks.filter((t) => t.dueDate < todayStr && !t.status.startsWith('completed')).length;
+  const todayTasks = scheduledTasks.filter((t) => t.dueDate === todayStr);
 
-  // Pagination calculation
-  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / itemsPerPage));
-  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+  // Pagination slice
+  const totalItems = viewMode === 'paired' ? filteredPairedRows.length : filteredFlatTasks.length;
+  const totalPages = Math.ceil(totalItems / itemsPerPage) || 1;
+  const paginatedPairedRows = filteredPairedRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const paginatedFlatTasks = filteredFlatTasks.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
 
-  const paginatedTasks = useMemo(() => {
-    const startIndex = (validCurrentPage - 1) * itemsPerPage;
-    return filteredTasks.slice(startIndex, startIndex + itemsPerPage);
-  }, [filteredTasks, validCurrentPage, itemsPerPage]);
+  const getStatusBadge = (task?: ScheduledTask) => {
+    if (!task) return <span className="font-mono text-slate-400 font-bold">-</span>;
 
-  const startIndex = (validCurrentPage - 1) * itemsPerPage;
-  const endIndex = Math.min(startIndex + itemsPerPage, filteredTasks.length);
-
-  const getStatusBadge = (status: ScheduleStatus) => {
-    switch (status) {
-      case 'completed_on_time':
-        return <span className="rounded-full bg-green-100 px-2.5 py-0.5 text-[10px] font-bold text-green-800 border border-green-300">Completed On Time</span>;
-      case 'completed_early':
-        return <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800 border border-emerald-300">Completed Early</span>;
-      case 'completed_late':
-        return <span className="rounded-full bg-orange-100 px-2.5 py-0.5 text-[10px] font-bold text-orange-800 border border-orange-300">Completed Late</span>;
-      case 'due_today':
-        return <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-300 animate-pulse">Due Today</span>;
-      case 'available':
-        return <span className="rounded-full bg-cyan-100 px-2.5 py-0.5 text-[10px] font-bold text-cyan-800 border border-cyan-300">Upcoming (5D)</span>;
-      case 'overdue':
-        return <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-bold text-red-800 border border-red-300">Overdue</span>;
-      case 'cancelled':
-        return <span className="rounded-full bg-slate-200 px-2.5 py-0.5 text-[10px] font-bold text-slate-700">Cancelled</span>;
-      case 'future':
-      default:
-        return <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-medium text-slate-600">Future Scheduled</span>;
+    if (task.status === 'completed_on_time') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+          <CheckCircle className="h-3 w-3" /> Done (100)
+        </span>
+      );
     }
+    if (task.status === 'completed_early') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-teal-100 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+          <CheckCircle className="h-3 w-3" /> Early ({task.score || 100})
+        </span>
+      );
+    }
+    if (task.status === 'completed_late') {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+          <Clock className="h-3 w-3" /> Late ({task.score || 80})
+        </span>
+      );
+    }
+    if (task.dueDate < todayStr) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800">
+          <AlertTriangle className="h-3 w-3" /> Overdue
+        </span>
+      );
+    }
+    if (task.dueDate === todayStr) {
+      return (
+        <span className="inline-flex items-center gap-1 rounded bg-blue-100 px-2 py-0.5 text-[10px] font-bold text-blue-800">
+          <Clock className="h-3 w-3" /> Due Today
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+        Scheduled
+      </span>
+    );
   };
 
-  const handleExportCSV = () => {
-    const headers = [
-      'Schedule ID',
-      'Task Code',
-      'Machine Name',
-      'Checklist',
-      'Assigned Doer',
-      'Department',
-      'Due Date',
-      'Status',
-      'Completed Date',
-      'Completed Time',
-      'Delay Days',
-      'Score',
-      'Remarks',
-    ];
+  const handleQuickComplete = (task: ScheduledTask) => {
+    setActiveCompletingTask(task);
+    setCompleteRemarks('Routine preventive maintenance completed per standard checklist.');
+    setCompleteObservation('Machine running smoothly within vibration and temperature limits.');
+  };
 
-    const rows = filteredTasks.map((t) => [
-      t.scheduleId,
-      t.taskCode,
-      `"${t.taskName}"`,
-      `"${t.checklistName}"`,
-      `"${t.assignedUserName}"`,
-      `"${t.departmentName}"`,
-      t.dueDate,
-      t.status,
-      t.completedDate || '',
-      t.completedTime || '',
-      t.delayDays ?? '',
-      t.score ?? '',
-      `"${(t.remarks || '').replace(/"/g, '""')}"`,
+  const submitCompletion = () => {
+    if (!activeCompletingTask) return;
+    markTaskAsDone(activeCompletingTask.id, {
+      remarks: completeRemarks,
+      observation: completeObservation,
+    });
+    setActiveCompletingTask(null);
+  };
+
+  const exportCSV = () => {
+    const headers = ['Date', 'Day', 'M/C 1 Machine', 'M/C 1 Status', 'M/C 2 Machine', 'M/C 2 Status', 'Cycle', 'Cycle Day', 'Doer', 'Department'];
+    const rows = filteredPairedRows.map((r) => [
+      r.date,
+      r.dayName,
+      `"${r.mc1?.taskName || '-'}"`,
+      r.mc1?.status || 'None',
+      `"${r.mc2?.taskName || '-'}"`,
+      r.mc2?.status || 'None',
+      `Cycle ${r.cycleNumber}`,
+      `Day ${r.cycleDay}`,
+      `"${r.mc1?.assignedUserName || 'Swapan Kr Ghorai'}"`,
+      `"Yarn Division"`,
     ]);
 
-    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = [headers.join(','), ...rows.map((e) => e.join(','))].join('\n');
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
-    link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `YFL_Master_Schedule_${todayStr}.csv`);
+    link.setAttribute('href', url);
+    link.setAttribute('download', `YFL_Yarn_Maintenance_Schedule_${todayStr}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
 
-  const handleOpenCorrection = (task: ScheduledTask) => {
-    setCorrectionModalTask(task);
-    setCorrectionStatus(task.status);
-    setCorrectionScore(task.score ?? 100);
-    setCorrectionReason('');
-  };
-
-  const handleSaveCorrection = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!correctionModalTask) return;
-    if (!correctionReason.trim()) {
-      alert('A valid reason is required for administrative completion correction audit.');
-      return;
-    }
-
-    adminCorrectCompletion(correctionModalTask.id, {
-      reason: correctionReason.trim(),
-      newStatus: correctionStatus,
-      newScore: Number(correctionScore),
-    });
-
-    setCorrectionModalTask(null);
-  };
-
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {/* Page Header */}
-      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-xs lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {title || (isAdmin ? 'Master Schedule Registry' : 'My Schedule View')}
+          <div className="flex items-center gap-2">
+            <span className="rounded bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-800 uppercase tracking-wider">
+              Yajur Fibres Limited • Yarn Division
+            </span>
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+              17-Day Paired Rotation Active
+            </span>
+          </div>
+          <h1 className="mt-1 text-xl font-bold text-slate-900 sm:text-2xl">
+            {title || 'Master Daily Machine Maintenance Schedule'}
           </h1>
-          <p className="text-xs text-slate-700 mt-0.5">
-            {subtitle || 'Full one-year preventive maintenance schedule with real-time status classifications.'}
+          <p className="text-xs text-slate-600 mt-1">
+            {subtitle || 'Full year paired daily schedule for Swapan Kr Ghorai (M/C 1 and M/C 2 parallel groups, Sunday skipped).'}
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* View toggle */}
-          <div className="flex rounded-lg border border-slate-300 p-0.5 bg-slate-50">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* View Mode Toggle */}
+          <div className="flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 text-xs font-semibold">
             <button
-              onClick={() => setViewMode('table')}
-              className={`flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold ${
-                viewMode === 'table' ? 'bg-white text-emerald-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+              onClick={() => setViewMode('paired')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                viewMode === 'paired' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Paired Daily (M/C 1 &amp; M/C 2)
+            </button>
+            <button
+              onClick={() => setViewMode('flat')}
+              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 transition-colors ${
+                viewMode === 'flat' ? 'bg-white text-emerald-800 shadow-xs' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <List className="h-3.5 w-3.5" />
-              Table View
-            </button>
-            <button
-              onClick={() => setViewMode('calendar')}
-              className={`flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-semibold ${
-                viewMode === 'calendar' ? 'bg-white text-emerald-800 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Calendar className="h-3.5 w-3.5" />
-              Calendar View
+              Flat Tasks ({totalTasks})
             </button>
           </div>
 
           <button
-            onClick={handleExportCSV}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
+            onClick={exportCSV}
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition-colors shadow-xs"
           >
-            <Download className="h-4 w-4 text-slate-600" />
+            <Download className="h-3.5 w-3.5 text-slate-500" />
             Export CSV
           </button>
         </div>
       </div>
 
-      {/* Summary KPI Cards with Total Task Calculations */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <div
-          onClick={() => setStatusFilter('all')}
-          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
-            statusFilter === 'all'
-              ? 'border-slate-800 bg-slate-900 text-white ring-2 ring-slate-800'
-              : 'border-slate-200 bg-white hover:border-slate-400'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-bold ${statusFilter === 'all' ? 'text-slate-200' : 'text-slate-700'}`}>
-              Total Tasks
-            </span>
-            <ListTodo className={`h-4 w-4 ${statusFilter === 'all' ? 'text-slate-300' : 'text-slate-600'}`} />
-          </div>
-          <p className={`mt-2 text-2xl font-black ${statusFilter === 'all' ? 'text-white' : 'text-slate-900'}`}>
-            {metrics.totalCount}
-          </p>
-          <span className={`text-[10px] ${statusFilter === 'all' ? 'text-slate-300' : 'text-slate-600'}`}>
-            All 1-Year Entries
+      {/* KPI Cards */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Total Working Days</span>
+          <p className="text-xl font-bold text-slate-900 mt-1">{totalDays}</p>
+          <span className="text-[10px] text-slate-500">Sundays skipped</span>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Total Machine Tasks</span>
+          <p className="text-xl font-bold text-blue-700 mt-1">{totalTasks}</p>
+          <span className="text-[10px] text-blue-600">M/C 1 &amp; M/C 2 combined</span>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Completed Done</span>
+          <p className="text-xl font-bold text-emerald-700 mt-1">{completedTasks}</p>
+          <span className="text-[10px] text-emerald-600">
+            {totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0}% completion
           </span>
         </div>
 
-        <div
-          onClick={() => setStatusFilter('due_today')}
-          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
-            statusFilter === 'due_today'
-              ? 'border-blue-600 bg-blue-600 text-white ring-2 ring-blue-500'
-              : 'border-amber-200 bg-amber-50/60 hover:border-amber-400'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-bold ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-900'}`}>
-              Due Today
-            </span>
-            <Clock className={`h-4 w-4 ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-800'}`} />
-          </div>
-          <p className={`mt-2 text-2xl font-black ${statusFilter === 'due_today' ? 'text-white' : 'text-amber-900'}`}>
-            {metrics.dueTodayCount}
-          </p>
-          <span className={`text-[10px] font-semibold ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-800'}`}>
-            {todayStr}
-          </span>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Due Today</span>
+          <p className="text-xl font-bold text-indigo-700 mt-1">{todayTasks.length}</p>
+          <span className="text-[10px] text-indigo-600 font-mono">{todayStr}</span>
         </div>
 
-        <div
-          onClick={() => setStatusFilter('upcoming')}
-          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
-            statusFilter === 'upcoming'
-              ? 'border-cyan-700 bg-cyan-700 text-white ring-2 ring-cyan-600'
-              : 'border-cyan-200 bg-cyan-50/50 hover:border-cyan-400'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-bold ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-900'}`}>
-              Upcoming (Today + 5D)
-            </span>
-            <Calendar className={`h-4 w-4 ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-700'}`} />
-          </div>
-          <p className={`mt-2 text-2xl font-black ${statusFilter === 'upcoming' ? 'text-white' : 'text-cyan-900'}`}>
-            {metrics.upcoming5DaysCount}
-          </p>
-          <span className={`text-[10px] ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-800'}`}>
-            Next 5 Days Horizon
-          </span>
-        </div>
-
-        <div
-          onClick={() => setStatusFilter('overdue')}
-          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
-            statusFilter === 'overdue'
-              ? 'border-red-600 bg-red-600 text-white ring-2 ring-red-500'
-              : 'border-red-200 bg-red-50/60 hover:border-red-400'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-bold ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-900'}`}>
-              Overdue Tasks
-            </span>
-            <AlertTriangle className={`h-4 w-4 ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-800'}`} />
-          </div>
-          <p className={`mt-2 text-2xl font-black ${statusFilter === 'overdue' ? 'text-white' : 'text-red-900'}`}>
-            {metrics.overdueCount}
-          </p>
-          <span className={`text-[10px] font-semibold ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-900'}`}>
-            Due Date Crossed
-          </span>
-        </div>
-
-        <div
-          onClick={() => setStatusFilter('done')}
-          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
-            statusFilter === 'done' || statusFilter === 'completed'
-              ? 'border-emerald-700 bg-emerald-700 text-white ring-2 ring-emerald-600'
-              : 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-400'
-          }`}
-        >
-          <div className="flex items-center justify-between">
-            <span className={`text-[11px] font-bold ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-900'}`}>
-              Done / Completed
-            </span>
-            <CheckCircle className={`h-4 w-4 ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-700'}`} />
-          </div>
-          <p className={`mt-2 text-2xl font-black ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-white' : 'text-emerald-900'}`}>
-            {metrics.completedCount}
-          </p>
-          <span className={`text-[10px] font-semibold ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-800'}`}>
-            Verified History
-          </span>
+        <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-xs">
+          <span className="text-[11px] font-semibold text-slate-500">Overdue Pending</span>
+          <p className="text-xl font-bold text-rose-700 mt-1">{overdueTasks}</p>
+          <span className="text-[10px] text-rose-600">Needs attention</span>
         </div>
       </div>
 
-      {/* Filter and Page Size Controls */}
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs sm:grid-cols-2 lg:grid-cols-5">
-        {/* Search */}
-        <div className="relative lg:col-span-2">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search Machine, Code, Doer, Checklist..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
-          />
-        </div>
+      {/* Filter Toolbar */}
+      <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-1 flex-wrap items-center gap-3">
+          <div className="relative min-w-[240px] flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search machine, date, code..."
+              value={searchQuery}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="w-full rounded-lg border border-slate-300 py-1.5 pl-9 pr-3 text-xs text-slate-900 focus:border-emerald-500 focus:outline-hidden"
+            />
+          </div>
 
-        {/* Status Filter */}
-        <div>
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
-          >
-            <option value="all">All Statuses ({metrics.totalCount})</option>
-            <option value="due_today">Due Today ({metrics.dueTodayCount})</option>
-            <option value="upcoming">Upcoming (Today + 5 Days) ({metrics.upcoming5DaysCount})</option>
-            <option value="overdue">Overdue (Due Crossed) ({metrics.overdueCount})</option>
-            <option value="done">Done / Completed ({metrics.completedCount})</option>
-            <option value="future">Future Scheduled</option>
-            <option value="cancelled">Cancelled</option>
-          </select>
-        </div>
-
-        {/* Doer Filter (Admin only) or Month */}
-        {isAdmin ? (
-          <div>
+          <div className="flex items-center gap-2">
+            <Filter className="h-3.5 w-3.5 text-slate-500" />
             <select
-              value={doerFilter}
-              onChange={(e) => setDoerFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
+              value={statusFilter}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
             >
-              <option value="all">All Technicians</option>
-              {users
-                .filter((u) => u.role === 'doer')
-                .map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.name} ({u.employeeId})
-                  </option>
-                ))}
+              <option value="all">All Statuses</option>
+              <option value="due_today">Due Today ({todayTasks.length})</option>
+              <option value="pending">Pending</option>
+              <option value="completed">Completed ({completedTasks})</option>
+              <option value="overdue">Overdue ({overdueTasks})</option>
             </select>
           </div>
-        ) : (
-          <div>
+
+          <div className="flex items-center gap-2">
             <select
-              value={monthFilter}
-              onChange={(e) => setMonthFilter(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
+              value={cycleFilter}
+              onChange={(e) => {
+                setCycleFilter(e.target.value);
+                setCurrentPage(1);
+              }}
+              className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
             >
-              <option value="all">All Months (1-Year)</option>
-              <option value="2026-09">September 2026</option>
-              <option value="2026-10">October 2026</option>
-              <option value="2026-11">November 2026</option>
-              <option value="2026-12">December 2026</option>
-              <option value="2027-01">January 2027</option>
-              <option value="2027-02">February 2027</option>
-              <option value="2027-03">March 2027</option>
-              <option value="2027-04">April 2027</option>
-              <option value="2027-05">May 2027</option>
-              <option value="2027-06">June 2027</option>
-              <option value="2027-07">July 2027</option>
-              <option value="2027-08">August 2027</option>
-              <option value="2027-09">September 2027</option>
+              <option value="all">All Cycles</option>
+              <option value="1">Cycle 1 (Days 1 - 17)</option>
+              <option value="2">Cycle 2 (Days 1 - 17)</option>
+              <option value="3">Cycle 3 (Days 1 - 17)</option>
+              <option value="4">Cycle 4 (Days 1 - 17)</option>
+              <option value="5">Cycle 5 (Days 1 - 17)</option>
             </select>
           </div>
-        )}
 
-        {/* Page Wise Entries Selector (100 Entries or 250 Entries) */}
-        <div>
+          {viewMode === 'flat' && (
+            <div className="flex items-center gap-2">
+              <select
+                value={groupFilter}
+                onChange={(e) => {
+                  setGroupFilter(e.target.value as any);
+                  setCurrentPage(1);
+                }}
+                className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
+              >
+                <option value="all">All Groups (M/C 1 &amp; M/C 2)</option>
+                <option value="MC1">Group 1 (M/C 1 - 17 Machines)</option>
+                <option value="MC2">Group 2 (M/C 2 - 16 Machines)</option>
+              </select>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 text-xs text-slate-600">
+          <span>Rows per page:</span>
           <select
             value={itemsPerPage}
-            onChange={(e) => setItemsPerPage(Number(e.target.value))}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-800 focus:border-emerald-500 focus:outline-hidden bg-slate-50"
+            onChange={(e) => {
+              setItemsPerPage(Number(e.target.value));
+              setCurrentPage(1);
+            }}
+            className="rounded border border-slate-300 px-2 py-1 text-xs"
           >
-            <option value={100}>100 Entries / Page</option>
-            <option value={250}>250 Entries / Page</option>
-            <option value={50}>50 Entries / Page</option>
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={200}>200</option>
           </select>
         </div>
       </div>
 
-      {/* Table View */}
-      {viewMode === 'table' ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
-          {/* Table Top Status / Pagination Header */}
-          <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 bg-slate-50/80 px-4 py-3 gap-2">
-            <div className="text-xs text-slate-700">
-              Showing <strong className="text-slate-900">{filteredTasks.length === 0 ? 0 : startIndex + 1}</strong> to{' '}
-              <strong className="text-slate-900">{endIndex}</strong> of{' '}
-              <strong className="text-slate-900">{filteredTasks.length}</strong> matching entries{' '}
-              <span className="text-slate-700">(Total Scheduled Tasks in Database: {metrics.totalCount})</span>
-            </div>
-
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-600 font-medium">
-                  Page {validCurrentPage} of {totalPages}
-                </span>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                    disabled={validCurrentPage === 1}
-                    className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                  >
-                    <ChevronLeft className="h-3.5 w-3.5" />
-                    Prev
-                  </button>
-                  <button
-                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                    disabled={validCurrentPage === totalPages}
-                    className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                  >
-                    Next
-                    <ChevronRight className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
-
+      {/* Main Table Content */}
+      <div className="rounded-xl border border-slate-200 bg-white shadow-xs overflow-hidden">
+        {viewMode === 'paired' ? (
+          /* Paired Daily View (M/C 1 & M/C 2 Parallel Columns) */
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-700">
-              <thead className="border-b border-slate-200 bg-slate-100/90 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                 <tr>
-                  <th className="p-3">Schedule ID</th>
-                  <th className="p-3">Task / Machine</th>
-                  <th className="p-3">Checklist</th>
+                  <th className="p-3">Date</th>
+                  <th className="p-3">Day</th>
+                  <th className="p-3">M/C 1 (Group 1)</th>
+                  <th className="p-3 text-center">M/C 1 Status</th>
+                  <th className="p-3">M/C 2 (Group 2)</th>
+                  <th className="p-3 text-center">M/C 2 Status</th>
+                  <th className="p-3 text-center">Cycle / Day</th>
                   <th className="p-3">Doer</th>
-                  <th className="p-3">Due Date (Sorted)</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Completed At</th>
-                  <th className="p-3">Delay</th>
-                  <th className="p-3">Score</th>
                   <th className="p-3 text-right">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {paginatedTasks.length === 0 ? (
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {paginatedPairedRows.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-12 text-center text-slate-700">
-                      <ListTodo className="mx-auto h-8 w-8 text-slate-400 mb-2" />
-                      <p className="font-semibold text-slate-800">No schedule records found</p>
-                      <p className="text-xs text-slate-600 mt-0.5">Adjust your search or status filters to view records.</p>
+                    <td colSpan={9} className="p-8 text-center text-slate-500">
+                      No schedule records matched your filter criteria.
                     </td>
                   </tr>
                 ) : (
-                  paginatedTasks.map((task) => {
-                    const isTaskDueToday = (task.status === 'due_today' || task.dueDate === todayStr) && !task.status.startsWith('completed');
-                    const isTaskOverdue = task.dueDate < todayStr && !task.status.startsWith('completed');
+                  paginatedPairedRows.map((row, idx) => {
+                    const isDay17 = row.cycleDay === 17;
+                    const isToday = row.date === todayStr;
 
                     return (
                       <tr
-                        key={task.id}
+                        key={row.date}
                         className={`transition-colors ${
-                          isTaskOverdue
-                            ? 'bg-red-50/30 hover:bg-red-50/60'
-                            : isTaskDueToday
-                            ? 'bg-blue-50/30 hover:bg-blue-50/60'
-                            : 'hover:bg-slate-50/70'
-                        }`}
+                          isToday
+                            ? 'bg-blue-50/70 font-semibold'
+                            : isDay17
+                            ? 'bg-amber-50/50'
+                            : idx % 2 === 0
+                            ? 'bg-white'
+                            : 'bg-slate-50/40'
+                        } hover:bg-slate-100/80`}
                       >
-                        <td className="p-3 font-mono text-[11px] font-medium text-slate-700">{task.scheduleId}</td>
-                        <td className="p-3 font-bold text-slate-900">
-                          {task.taskName}
-                          <span className="block font-mono text-[10px] font-normal text-slate-700">{task.taskCode}</span>
+                        {/* Date */}
+                        <td className="p-3 font-mono font-bold text-slate-900 whitespace-nowrap">
+                          {row.date}
+                          {isToday && (
+                            <span className="ml-1.5 rounded bg-blue-600 px-1.5 py-0.2 text-[9px] font-bold text-white">
+                              TODAY
+                            </span>
+                          )}
                         </td>
-                        <td className="p-3 text-slate-700">{task.checklistName}</td>
-                        <td className="p-3">
-                          <span className="font-semibold text-slate-900">{task.assignedUserName}</span>
-                          <span className="block text-[10px] text-slate-700">{task.assignedEmployeeId}</span>
-                        </td>
-                        <td className="p-3 font-mono font-bold text-slate-900">
-                          <span
-                            className={
-                              isTaskOverdue
-                                ? 'text-red-700'
-                                : isTaskDueToday
-                                ? 'text-blue-700'
-                                : 'text-slate-900'
-                            }
-                          >
-                            {task.dueDate}
+
+                        {/* Day */}
+                        <td className="p-3 whitespace-nowrap">
+                          <span className={`font-semibold ${row.dayName === 'Saturday' ? 'text-indigo-700 font-bold' : 'text-slate-800'}`}>
+                            {row.dayName}
                           </span>
                         </td>
-                        <td className="p-3">{getStatusBadge(task.status)}</td>
-                        <td className="p-3 text-slate-700">
-                          {task.completedDate ? (
-                            <>
-                              <span className="font-mono text-emerald-800 font-semibold">{task.completedDate}</span>
-                              <span className="block text-[10px] text-slate-700">{task.completedTime}</span>
-                            </>
-                          ) : (
-                            <span className="text-slate-600">—</span>
-                          )}
-                        </td>
+
+                        {/* M/C 1 */}
                         <td className="p-3">
-                          {task.delayDays !== undefined ? (
-                            <span className={task.delayDays > 0 ? 'font-bold text-amber-800' : 'text-emerald-800'}>
-                              {task.delayDays === 0 ? '0d (On Time)' : `+${task.delayDays}d late`}
-                            </span>
-                          ) : isTaskOverdue ? (
-                            <span className="font-bold text-red-700">Overdue</span>
+                          {row.mc1 ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-5 w-5 items-center justify-center rounded bg-blue-100 font-mono text-[10px] font-bold text-blue-800 shrink-0">
+                                1
+                              </span>
+                              <span className="font-bold text-slate-900">{row.mc1.taskName}</span>
+                            </div>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <span className="text-slate-400 font-mono">-</span>
                           )}
                         </td>
+
+                        {/* M/C 1 Status */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {getStatusBadge(row.mc1)}
+                        </td>
+
+                        {/* M/C 2 */}
                         <td className="p-3">
-                          {task.score !== undefined ? (
-                            <span className="font-extrabold text-slate-900">{task.score} pts</span>
+                          {row.mc2 ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="flex h-5 w-5 items-center justify-center rounded bg-purple-100 font-mono text-[10px] font-bold text-purple-800 shrink-0">
+                                2
+                              </span>
+                              <span className="font-bold text-slate-900">{row.mc2.taskName}</span>
+                            </div>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <div className="flex items-center gap-1">
+                              <span className="font-mono text-slate-400 font-bold text-sm">-</span>
+                              <span className="text-[10px] text-amber-700 font-medium italic">(Day 17 Spg-5 Solo)</span>
+                            </div>
                           )}
                         </td>
-                        <td className="p-3 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => setSelectedTaskDetails(task)}
-                              title="View Full Task Record"
-                              className="rounded p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
-                            >
-                              <Eye className="h-4 w-4" />
-                            </button>
-                            {isAdmin && task.completedAt && (
+
+                        {/* M/C 2 Status */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          {row.mc2 ? getStatusBadge(row.mc2) : <span className="font-mono text-slate-400">-</span>}
+                        </td>
+
+                        {/* Cycle / Day */}
+                        <td className="p-3 text-center whitespace-nowrap">
+                          <span className="rounded bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-700 mr-1">
+                            C{row.cycleNumber}
+                          </span>
+                          <span
+                            className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                              isDay17 ? 'bg-amber-200 text-amber-900' : 'bg-slate-200 text-slate-800'
+                            }`}
+                          >
+                            D{row.cycleDay}/17
+                          </span>
+                        </td>
+
+                        {/* Doer */}
+                        <td className="p-3 whitespace-nowrap text-slate-800 font-semibold">
+                          {row.mc1?.assignedUserName || 'Swapan Kr Ghorai'}
+                        </td>
+
+                        {/* Actions */}
+                        <td className="p-3 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {row.mc1 && (
                               <button
-                                onClick={() => handleOpenCorrection(task)}
-                                title="Admin Correction"
-                                className="rounded p-1.5 text-blue-700 hover:bg-blue-50 hover:text-blue-900 cursor-pointer"
+                                title="View/Complete M/C 1"
+                                onClick={() => setSelectedTaskDetails(row.mc1!)}
+                                className="rounded bg-blue-50 px-2 py-1 text-[10px] font-bold text-blue-800 hover:bg-blue-100 transition-colors"
                               >
-                                <Edit className="h-4 w-4" />
+                                M/C 1
+                              </button>
+                            )}
+                            {row.mc2 && (
+                              <button
+                                title="View/Complete M/C 2"
+                                onClick={() => setSelectedTaskDetails(row.mc2!)}
+                                className="rounded bg-purple-50 px-2 py-1 text-[10px] font-bold text-purple-800 hover:bg-purple-100 transition-colors"
+                              >
+                                M/C 2
                               </button>
                             )}
                           </div>
@@ -667,317 +602,228 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
               </tbody>
             </table>
           </div>
+        ) : (
+          /* Flat Task View */
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs text-slate-700">
+              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                <tr>
+                  <th className="p-3">Task Code</th>
+                  <th className="p-3">Group</th>
+                  <th className="p-3">Machine / Task Name</th>
+                  <th className="p-3">Due Date</th>
+                  <th className="p-3">Day</th>
+                  <th className="p-3 text-center">Cycle / Day</th>
+                  <th className="p-3">Doer</th>
+                  <th className="p-3 text-center">Status</th>
+                  <th className="p-3 text-center">Score</th>
+                  <th className="p-3 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {paginatedFlatTasks.length === 0 ? (
+                  <tr>
+                    <td colSpan={10} className="p-8 text-center text-slate-500">
+                      No task records found.
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedFlatTasks.map((task, idx) => (
+                    <tr
+                      key={task.id}
+                      className={`hover:bg-slate-50 transition-colors ${
+                        task.dueDate === todayStr ? 'bg-blue-50/50 font-semibold' : idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'
+                      }`}
+                    >
+                      <td className="p-3 font-mono font-bold text-slate-900">{task.taskCode}</td>
+                      <td className="p-3">
+                        <span
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            task.rotationGroup === 'MC1' ? 'bg-blue-100 text-blue-800' : 'bg-purple-100 text-purple-800'
+                          }`}
+                        >
+                          {task.rotationGroup}
+                        </span>
+                      </td>
+                      <td className="p-3 font-bold text-slate-900">{task.taskName}</td>
+                      <td className="p-3 font-mono font-bold text-slate-800">{task.dueDate}</td>
+                      <td className="p-3">{task.dayName}</td>
+                      <td className="p-3 text-center">
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-700 mr-1">
+                          C{task.cycleNumber}
+                        </span>
+                        <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-800">
+                          D{task.cycleDay}
+                        </span>
+                      </td>
+                      <td className="p-3 font-semibold text-slate-800">{task.assignedUserName}</td>
+                      <td className="p-3 text-center">{getStatusBadge(task)}</td>
+                      <td className="p-3 text-center font-mono font-bold">
+                        {task.score !== undefined ? (
+                          <span
+                            className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                              task.score >= 95
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : task.score >= 80
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {task.score}
+                          </span>
+                        ) : (
+                          <span className="text-slate-400">-</span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          onClick={() => setSelectedTaskDetails(task)}
+                          className="rounded bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-800 hover:bg-slate-200 transition-colors"
+                        >
+                          Details
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        )}
 
-          {/* Table Bottom Pagination Bar */}
-          <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-200 bg-slate-50/80 px-4 py-3 gap-3">
-            <div className="flex items-center gap-3 text-xs text-slate-700">
-              <span>
-                Showing page <strong>{validCurrentPage}</strong> of <strong>{totalPages}</strong> (
-                {filteredTasks.length === 0 ? 0 : startIndex + 1}–{endIndex} of {filteredTasks.length} filtered)
-              </span>
-              <span className="hidden sm:inline text-slate-300">|</span>
-              <div className="flex items-center gap-1.5">
-                <span className="text-slate-600">Rows per page:</span>
-                <select
-                  value={itemsPerPage}
-                  onChange={(e) => setItemsPerPage(Number(e.target.value))}
-                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
-                >
-                  <option value={100}>100</option>
-                  <option value={250}>250</option>
-                  <option value={50}>50</option>
-                </select>
-              </div>
-            </div>
+        {/* Pagination Footer */}
+        <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50/50 p-3 text-xs text-slate-600">
+          <div>
+            Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} entries
+          </div>
 
-            {/* Pagination Controls */}
-            {totalPages > 1 && (
-              <div className="flex items-center gap-1.5">
-                <button
-                  onClick={() => setCurrentPage(1)}
-                  disabled={validCurrentPage === 1}
-                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                >
-                  First
-                </button>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={validCurrentPage === 1}
-                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                >
-                  <ChevronLeft className="h-3.5 w-3.5" />
-                  Prev
-                </button>
-                <span className="px-2 text-xs font-bold text-slate-800">
-                  {validCurrentPage} / {totalPages}
-                </span>
-                <button
-                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={validCurrentPage === totalPages}
-                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                >
-                  Next
-                  <ChevronRight className="h-3.5 w-3.5" />
-                </button>
-                <button
-                  onClick={() => setCurrentPage(totalPages)}
-                  disabled={validCurrentPage === totalPages}
-                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
-                >
-                  Last
-                </button>
-              </div>
-            )}
+          <div className="flex items-center gap-2">
+            <button
+              disabled={currentPage <= 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 disabled:opacity-40"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" /> Previous
+            </button>
+            <span className="font-bold text-slate-900">
+              Page {currentPage} of {totalPages}
+            </span>
+            <button
+              disabled={currentPage >= totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="flex items-center gap-1 rounded border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 disabled:opacity-40"
+            >
+              Next <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
         </div>
-      ) : (
-        /* Calendar View */
-        <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
-            <h2 className="text-sm font-bold text-slate-900">
-              Schedule Calendar — September 2026
-            </h2>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="flex items-center gap-1 text-emerald-800 font-semibold">
-                <span className="h-2 w-2 rounded-full bg-emerald-600" /> Done
-              </span>
-              <span className="flex items-center gap-1 text-blue-800 font-semibold">
-                <span className="h-2 w-2 rounded-full bg-blue-600" /> Today
-              </span>
-              <span className="flex items-center gap-1 text-red-800 font-semibold">
-                <span className="h-2 w-2 rounded-full bg-red-600" /> Overdue
-              </span>
-            </div>
-          </div>
+      </div>
 
-          <div className="grid grid-cols-7 gap-2 text-center font-bold text-xs text-slate-700 pb-2 border-b border-slate-100">
-            <div>Sun</div>
-            <div>Mon</div>
-            <div>Tue</div>
-            <div>Wed</div>
-            <div>Thu</div>
-            <div>Fri</div>
-            <div>Sat</div>
-          </div>
-
-          <div className="grid grid-cols-7 gap-2 pt-2">
-            {Array.from({ length: 30 }).map((_, idx) => {
-              const day = idx + 1;
-              const dateStr = `2026-09-${day.toString().padStart(2, '0')}`;
-              const dayTasks = filteredTasks.filter((t) => t.dueDate === dateStr);
-              const isToday = dateStr === todayStr;
-
-              return (
-                <div
-                  key={day}
-                  className={`min-h-24 rounded-lg border p-1.5 text-left transition-all ${
-                    isToday
-                      ? 'border-blue-500 bg-blue-50/40 ring-1 ring-blue-500'
-                      : 'border-slate-200 bg-slate-50/50 hover:bg-white'
-                  }`}
-                >
-                  <div className="flex items-center justify-between text-xs">
-                    <span className={`font-bold ${isToday ? 'text-blue-900' : 'text-slate-700'}`}>
-                      {day}
-                    </span>
-                    {dayTasks.length > 0 && (
-                      <span className="rounded-full bg-slate-200 px-1 py-0.2 text-[9px] font-bold text-slate-700">
-                        {dayTasks.length}
-                      </span>
-                    )}
-                  </div>
-
-                  <div className="mt-1 space-y-1 overflow-hidden">
-                    {dayTasks.slice(0, 3).map((t) => (
-                      <div
-                        key={t.id}
-                        onClick={() => setSelectedTaskDetails(t)}
-                        className={`truncate rounded px-1 py-0.5 text-[9px] font-semibold cursor-pointer ${
-                          t.status.startsWith('completed')
-                            ? 'bg-emerald-100 text-emerald-900 hover:bg-emerald-200'
-                            : t.status === 'due_today'
-                            ? 'bg-blue-200 text-blue-900 font-bold'
-                            : t.status === 'overdue'
-                            ? 'bg-red-100 text-red-900 font-bold'
-                            : 'bg-white text-slate-700 border border-slate-200'
-                        }`}
-                        title={`${t.taskCode}: ${t.taskName}`}
-                      >
-                        {t.taskName}
-                      </div>
-                    ))}
-                    {dayTasks.length > 3 && (
-                      <span className="text-[9px] text-slate-600 block text-center">
-                        +{dayTasks.length - 3} more
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Task Details Modal */}
+      {/* Task Details & Completion Modal */}
       {selectedTaskDetails && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs overflow-y-auto">
-          <div className="my-8 w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4 backdrop-blur-xs">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-xl space-y-4">
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
               <div>
-                <h3 className="text-sm font-bold text-slate-900">
-                  {selectedTaskDetails.taskCode} • {selectedTaskDetails.taskName}
-                </h3>
-                <p className="text-[11px] text-slate-700 font-mono">
-                  {selectedTaskDetails.scheduleId}
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-[10px] font-bold ${
+                      selectedTaskDetails.rotationGroup === 'MC1'
+                        ? 'bg-blue-100 text-blue-800'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}
+                  >
+                    Group {selectedTaskDetails.rotationGroup} • Pos {selectedTaskDetails.rotationPosition}
+                  </span>
+                  <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-bold text-slate-700">
+                    Cycle {selectedTaskDetails.cycleNumber}, Day {selectedTaskDetails.cycleDay} / 17
+                  </span>
+                </div>
+                <h2 className="text-lg font-bold text-slate-900 mt-1">{selectedTaskDetails.taskName}</h2>
+                <p className="text-xs text-slate-500 font-mono">
+                  Task Code: {selectedTaskDetails.taskCode} • Due Date: {selectedTaskDetails.dueDate} ({selectedTaskDetails.dayName})
                 </p>
               </div>
-              <button onClick={() => setSelectedTaskDetails(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
+              <button
+                onClick={() => setSelectedTaskDetails(null)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
                 <X className="h-5 w-5" />
               </button>
             </div>
 
-            <div className="mt-4 space-y-3 text-xs">
-              <div className="grid grid-cols-2 gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <div>
-                  <span className="text-slate-700 block text-[10px]">Due Date</span>
-                  <span className="font-bold text-slate-900">{selectedTaskDetails.dueDate}</span>
-                </div>
-                <div>
-                  <span className="text-slate-700 block text-[10px]">Status</span>
-                  <div className="mt-0.5">{getStatusBadge(selectedTaskDetails.status)}</div>
-                </div>
-                <div>
-                  <span className="text-slate-700 block text-[10px]">Assigned Doer</span>
-                  <span className="font-bold text-slate-900">{selectedTaskDetails.assignedUserName} ({selectedTaskDetails.assignedEmployeeId})</span>
-                </div>
-                <div>
-                  <span className="text-slate-700 block text-[10px]">Frequency Rule</span>
-                  <span className="font-bold text-slate-900">{selectedTaskDetails.frequencyDisplay}</span>
-                </div>
+            <div className="grid grid-cols-2 gap-4 rounded-lg bg-slate-50 p-3 text-xs">
+              <div>
+                <span className="text-slate-500 block">Assigned Doer:</span>
+                <span className="font-bold text-slate-900">{selectedTaskDetails.assignedUserName}</span>
+                <span className="text-[10px] text-slate-500 block">Employee ID: {selectedTaskDetails.assignedEmployeeId}</span>
               </div>
-
-              {selectedTaskDetails.completedAt && (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3 space-y-2">
-                  <div className="flex justify-between items-center font-bold text-emerald-900">
-                    <span>Completion Record</span>
-                    <span>Score: {selectedTaskDetails.score} pts</span>
-                  </div>
-                  <p className="text-[11px] text-slate-700">
-                    <strong>Timestamp:</strong> {selectedTaskDetails.completedDate} at {selectedTaskDetails.completedTime} ({selectedTaskDetails.completionClassification?.toUpperCase()})
-                  </p>
-                  {selectedTaskDetails.remarks && (
-                    <p className="text-[11px] text-slate-700">
-                      <strong>Remarks:</strong> {selectedTaskDetails.remarks}
-                    </p>
-                  )}
-                  {selectedTaskDetails.observation && (
-                    <p className="text-[11px] text-red-700">
-                      <strong>Observation:</strong> {selectedTaskDetails.observation}
-                    </p>
-                  )}
-                  {selectedTaskDetails.correctiveAction && (
-                    <p className="text-[11px] text-amber-800">
-                      <strong>Corrective Action:</strong> {selectedTaskDetails.correctiveAction}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {selectedTaskDetails.adminCorrection && (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-[11px] text-amber-900">
-                  <p className="font-bold">Admin Correction Applied:</p>
-                  <p className="mt-0.5">Corrected by {selectedTaskDetails.adminCorrection.correctedByName} on {selectedTaskDetails.adminCorrection.correctedAt.slice(0, 10)}</p>
-                  <p className="mt-0.5"><strong>Reason:</strong> {selectedTaskDetails.adminCorrection.reason}</p>
-                </div>
-              )}
+              <div>
+                <span className="text-slate-500 block">Current Status:</span>
+                <div className="mt-0.5">{getStatusBadge(selectedTaskDetails)}</div>
+              </div>
             </div>
 
-            <div className="mt-5 flex justify-end">
+            {selectedTaskDetails.completedAt ? (
+              <div className="rounded-lg border border-emerald-200 bg-emerald-50/50 p-4 space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-emerald-900">Task Completed Details</span>
+                  <span className="rounded bg-emerald-200 px-2 py-0.5 text-[10px] font-bold text-emerald-900">
+                    Score: {selectedTaskDetails.score} / 100
+                  </span>
+                </div>
+                <p className="text-slate-700">
+                  <span className="font-semibold">Completed On:</span> {selectedTaskDetails.completedDate} at {selectedTaskDetails.completedTime}
+                </p>
+                {selectedTaskDetails.remarks && (
+                  <p className="text-slate-700">
+                    <span className="font-semibold">Remarks:</span> {selectedTaskDetails.remarks}
+                  </p>
+                )}
+                {selectedTaskDetails.observation && (
+                  <p className="text-slate-700">
+                    <span className="font-semibold">Observations:</span> {selectedTaskDetails.observation}
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-lg border border-slate-200 p-4">
+                <h3 className="text-xs font-bold text-slate-900">Mark This Machine Task Done</h3>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">Technician Remarks</label>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter maintenance observations or checklist summary..."
+                    value={completeRemarks}
+                    onChange={(e) => setCompleteRemarks(e.target.value)}
+                    className="w-full rounded-md border border-slate-300 p-2 text-xs text-slate-900 focus:border-emerald-500 focus:outline-hidden"
+                  />
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button
+                    onClick={() => {
+                      markTaskAsDone(selectedTaskDetails.id, {
+                        remarks: completeRemarks || 'Routine maintenance completed per standard checklist.',
+                      });
+                      setSelectedTaskDetails(null);
+                    }}
+                    className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-800 transition-colors"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Confirm Completion
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end pt-2">
               <button
                 onClick={() => setSelectedTaskDetails(null)}
-                className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 cursor-pointer"
+                className="rounded-lg border border-slate-300 px-4 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
               >
                 Close
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Admin Correction Modal */}
-      {correctionModalTask && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-xs">
-          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
-            <h3 className="text-sm font-bold text-slate-900">
-              Admin Completion Correction
-            </h3>
-            <p className="text-xs text-slate-700 mt-1">
-              Correcting task record for {correctionModalTask.taskName} ({correctionModalTask.scheduleId}). This action is recorded in the permanent audit log.
-            </p>
-
-            <form onSubmit={handleSaveCorrection} className="mt-4 space-y-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Adjusted Status
-                </label>
-                <select
-                  value={correctionStatus}
-                  onChange={(e) => setCorrectionStatus(e.target.value as ScheduleStatus)}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
-                >
-                  <option value="completed_on_time">Completed On Time (100 pts)</option>
-                  <option value="completed_early">Completed Early (100 pts)</option>
-                  <option value="completed_late">Completed Late</option>
-                  <option value="due_today">Reopen as Due Today</option>
-                  <option value="cancelled">Mark Cancelled</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Adjusted Score
-                </label>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={correctionScore}
-                  onChange={(e) => setCorrectionScore(Number(e.target.value))}
-                  className="w-full rounded-md border border-slate-300 px-3 py-2 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Mandatory Reason for Correction <span className="text-red-500">*</span>
-                </label>
-                <textarea
-                  rows={2}
-                  required
-                  placeholder="State the audit justification (e.g. machine maintenance was verified by shift supervisor on scheduled date)..."
-                  value={correctionReason}
-                  onChange={(e) => setCorrectionReason(e.target.value)}
-                  className="w-full rounded-md border border-slate-300 p-2 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setCorrectionModalTask(null)}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 cursor-pointer"
-                >
-                  Apply Correction
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       )}

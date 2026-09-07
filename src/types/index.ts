@@ -53,6 +53,7 @@ export interface ChecklistTemplate {
 }
 
 export type FrequencyType =
+  | 'sequential_rotation'
   | 'daily'
   | 'interval_days'
   | 'weekly'
@@ -63,10 +64,15 @@ export type FrequencyType =
 
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
+export type RotationGroup = 'MC1' | 'MC2';
+
 export interface TaskMaster {
   id: string;
+  taskId?: number; // 1 to 33
+  machineId?: string;
+  machineName?: string;
   taskCode: string;
-  taskName: string; // e.g. B. Card-1, COMBER-13
+  taskName: string; // e.g. B. Card-1 Machine Maintenance, COMBER-13 Machine Maintenance
   taskDescription: string;
   checklistTemplateId: string;
   checklistName: string;
@@ -76,9 +82,15 @@ export interface TaskMaster {
   departmentId: string;
   departmentName: string;
   taskCategory: string;
+  scheduleType?: string; // 'YFL 17-Day Dual Rotation'
+  
+  // Dual group rotation model
+  rotationGroup: RotationGroup;
+  rotationPosition: number; // 1-17 for MC1, 1-16 for MC2
+
   frequencyType: FrequencyType;
-  frequencyValue: number; // e.g. 15 for 15 days, 1 for every 1 day
-  weeklyDay?: number; // 0 = Sunday, 1 = Monday, etc.
+  frequencyValue: number;
+  weeklyDay?: number;
   startDate: string; // YYYY-MM-DD
   endDate?: string; // YYYY-MM-DD
   priority: TaskPriority;
@@ -131,10 +143,20 @@ export interface ScheduledTask {
   frequencyDisplay: string;
   originalStartDate: string;
   dueDate: string; // YYYY-MM-DD
+  dayName: string; // 'Monday', 'Saturday', etc.
   visibilityDate: string; // YYYY-MM-DD (dueDate - advanceDays)
   status: ScheduleStatus;
   priority: TaskPriority;
   instructions?: string;
+
+  // Rotation details
+  rotationGroup: RotationGroup;
+  rotationPosition: number; // 1-17 or 1-16
+  cycleNumber: number; // 1, 2, 3...
+  cycleDay: number; // 1 to 17
+  isSoloDay?: boolean; // true for Spg-5 on Day 17
+  pairedTaskMasterId?: string;
+  pairedTaskName?: string;
   
   // Completion details
   completedAt?: string; // ISO string
@@ -163,6 +185,43 @@ export interface ScheduledTask {
   
   generatedBy: string;
   generatedDate: string;
+}
+
+export interface DailyScheduleRow {
+  date: string; // YYYY-MM-DD
+  dayName: string; // 'Monday', 'Saturday', etc.
+  cycleNumber: number;
+  cycleDay: number; // 1 to 17
+  mc1Task?: ScheduledTask;
+  mc2Task?: ScheduledTask;
+  mc1MachineName: string;
+  mc2MachineName: string; // '-' if blank
+  doerName: string;
+  departmentName: string;
+  isHoliday?: boolean;
+  holidayName?: string;
+}
+
+export interface Holiday {
+  id: string;
+  date: string; // YYYY-MM-DD
+  name: string;
+  departmentId?: string;
+  departmentName?: string;
+  remarks?: string;
+  createdAt?: string;
+}
+
+export interface RotationTemplate {
+  id: string;
+  name: string;
+  departmentName: string;
+  workingDays: string;
+  excludedDays: string[];
+  cycleLengthDays: number;
+  mc1GroupLength: number;
+  mc2GroupLength: number;
+  cycleRestartRule: string;
 }
 
 export interface ScoreRules {
@@ -195,7 +254,8 @@ export interface AppSettings {
   department: string;
   timezone: string;
   workingDays?: string;
-  monthEndPolicy?: 'last_day_of_month' | 'skip_month' | 'exact_day_clamp';
+  skipSundays: boolean;
+  holidayPolicy: 'skip_and_shift' | 'keep_scheduled';
   taskAdvanceVisibilityDays: number;
   defaultScheduleHorizonMonths: number;
   invalidMonthlyDatePolicy: 'last_day' | 'skip';

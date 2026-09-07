@@ -10,6 +10,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AuditLogsPage } from './pages/admin/AuditLogsPage';
 import { ChecklistsPage } from './pages/admin/ChecklistsPage';
 import { DepartmentsPage } from './pages/admin/DepartmentsPage';
+import { HolidayMasterPage } from './pages/admin/HolidayMasterPage';
 import { MasterSchedulePage } from './pages/admin/MasterSchedulePage';
 import { ReportsPage } from './pages/admin/ReportsPage';
 import { SchedulerEnginePage } from './pages/admin/SchedulerEnginePage';
@@ -117,6 +118,9 @@ const MainLayout: React.FC = () => {
 
       case 'master-schedule':
         return <MasterSchedulePage initialFilter="all" />;
+
+      case 'holidays':
+        return <HolidayMasterPage />;
 
       case 'machine-history':
         return <MachineHistoryPage />;

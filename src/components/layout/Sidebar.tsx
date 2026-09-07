@@ -59,6 +59,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'tasks', label: 'Task Management', icon: ListTodo },
     { id: 'scheduler', label: 'Yearly Scheduler', icon: CalendarDays },
     { id: 'master-schedule', label: 'Master Schedule', icon: Calendar },
+    { id: 'holidays', label: 'Holiday Master', icon: CalendarDays },
     {
       id: 'due-today',
       label: "Today's Tasks",

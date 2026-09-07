@@ -1,5 +1,12 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { calculateVisibilityDate, generateScheduleDates, getFrequencySummary } from '../services/recurrenceEngine';
+import { format } from 'date-fns';
+import {
+  calculateVisibilityDate,
+  generateYflDualRotationSchedule,
+  getDayName,
+  getFrequencySummary,
+  YflRotationEngineResult,
+} from '../services/recurrenceEngine';
 import { evaluateTaskCompletion } from '../services/scoringEngine';
 import { storage } from '../services/storage';
 import {
@@ -7,7 +14,9 @@ import {
   AuditLog,
   ChecklistItemResponse,
   ChecklistTemplate,
+  DailyScheduleRow,
   Department,
+  Holiday,
   NotificationItem,
   ScheduledTask,
   TaskMaster,
@@ -24,6 +33,7 @@ interface TaskContextType {
   settings: AppSettings;
   notifications: NotificationItem[];
   auditLogs: AuditLog[];
+  holidays: Holiday[];
   todayStr: string;
 
   // Task Master actions
@@ -33,9 +43,17 @@ interface TaskContextType {
   deleteTaskMasterSafe: (id: string, cancelFutureOnly?: boolean) => { success: boolean; message?: string };
 
   // Schedule actions
-  generateOneYearSchedule: (taskMasterId: string, customMonths?: number) => { success: boolean; count: number; message?: string };
-  extendSchedule: (taskMasterId: string, monthsToAdd: number) => { success: boolean; count: number; message?: string };
-  bulkGenerateSchedules: (taskMasterIds: string[]) => { success: boolean; totalCount: number; message?: string };
+  generateYflRotationSchedule: (options?: {
+    startDate?: string;
+    durationDays?: number;
+    horizonMonths?: number;
+    skipHolidays?: boolean;
+    skipSundays?: boolean;
+  }) => { success: boolean; result?: YflRotationEngineResult; message?: string };
+  generateOneYearSchedule: (customStartDate?: string) => { success: boolean; count: number; message?: string };
+  extendSchedule: (monthsToAdd: number) => { success: boolean; count: number; message?: string };
+  bulkGenerateSchedules: (taskMasterIds?: string[]) => { success: boolean; totalCount: number; message?: string };
+  generateSequentialSchedule: (options?: any) => { success: boolean; totalCount: number; message?: string };
 
   // Task Completion actions
   markTaskAsDone: (
@@ -59,6 +77,11 @@ interface TaskContextType {
       remarks?: string;
     }
   ) => { success: boolean; message?: string };
+
+  // Holidays
+  addHoliday: (holidayData: Omit<Holiday, 'id' | 'createdAt'>) => { success: boolean; message?: string };
+  updateHoliday: (id: string, data: Partial<Holiday>) => { success: boolean; message?: string };
+  deleteHoliday: (id: string) => { success: boolean; message?: string };
 
   // User management actions
   addUser: (userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) => { success: boolean; user?: User; message?: string };
@@ -110,10 +133,11 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [settings, setSettings] = useState<AppSettings>(storage.getSettings());
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
 
-  // Live real factory date by default
+  // Real factory date or simulated date (default '2026-07-04' or live date)
   const [todayStr, setTodayStrState] = useState<string>(() => {
-    return localStorage.getItem('yfl_simulated_date') || getLiveDateStr();
+    return localStorage.getItem('yfl_simulated_date') || '2026-07-04';
   });
 
   const setTodayStr = (newDate: string) => {
@@ -151,11 +175,13 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loadAll = () => {
     const rawMasters = storage.getTaskMasters();
+    const rawHolidays = storage.getHolidays();
     const rawSchedules = storage.getScheduledTasks();
     const currentSettings = storage.getSettings();
     const updatedSchedules = updateDynamicStatuses(rawSchedules, currentSettings.taskAdvanceVisibilityDays || 5, todayStr);
 
     setTaskMasters(rawMasters);
+    setHolidays(rawHolidays);
     setScheduledTasks(updatedSchedules);
     setDepartments(storage.getDepartments());
     setUsers(storage.getUsers());
@@ -166,7 +192,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const clearAllData = () => {
-    storage.clearAllTaskData();
+    storage.clearAllData();
     loadAll();
   };
 
@@ -174,29 +200,24 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     loadAll();
   }, []);
 
+  // Update dynamic task statuses whenever todayStr or advanceDays changes
   useEffect(() => {
-    setScheduledTasks((prev) => {
-      const adv = settings.taskAdvanceVisibilityDays || 5;
-      return updateDynamicStatuses(prev, adv, todayStr);
-    });
+    setScheduledTasks((prev) => updateDynamicStatuses(prev, settings.taskAdvanceVisibilityDays || 5, todayStr));
   }, [todayStr, settings.taskAdvanceVisibilityDays]);
 
-  // Add Task Master
+  // Task Master actions
   const addTaskMaster = (data: Omit<TaskMaster, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => {
-    const existing = taskMasters.find((t) => t.taskCode.toLowerCase() === data.taskCode.toLowerCase());
-    if (existing) {
-      return { success: false, message: `Task Code ${data.taskCode} already exists.` };
-    }
-
+    const newId = `tm-${Date.now()}`;
     const newTask: TaskMaster = {
       ...data,
-      id: `task-master-${Date.now()}`,
-      createdBy: currentUser?.loginId || 'admin',
+      id: newId,
+      status: 'active',
+      createdBy: currentUser?.name || 'Administrator',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    const updated = [newTask, ...taskMasters];
+    const updated = [...taskMasters, newTask];
     storage.saveTaskMasters(updated);
     setTaskMasters(updated);
 
@@ -207,52 +228,49 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       role: currentUser?.role || 'admin',
       recordType: 'TaskMaster',
       recordId: newTask.taskCode,
-      reason: `Created master task for ${newTask.taskName} (${newTask.departmentName}).`,
-      newData: newTask,
+      reason: `Added new machine task master: ${newTask.taskName}`,
     });
 
-    return { success: true, task: newTask, message: 'Task Master created successfully.' };
+    return { success: true, task: newTask, message: 'Machine Task Master created successfully.' };
   };
 
-  // Update Task Master
-  const updateTaskMaster = (
-    id: string,
-    data: Partial<TaskMaster>,
-    rescheduleOptions?: { applyToFutureOnly: boolean }
-  ) => {
-    const target = taskMasters.find((t) => t.id === id);
-    if (!target) return { success: false, message: 'Task Master not found.' };
+  const updateTaskMaster = (id: string, data: Partial<TaskMaster>, rescheduleOptions?: { applyToFutureOnly: boolean }) => {
+    const index = taskMasters.findIndex((t) => t.id === id);
+    if (index === -1) return { success: false, message: 'Task Master not found' };
 
-    const oldData = { ...target };
-    const updatedTask: TaskMaster = {
-      ...target,
+    const old = taskMasters[index];
+    const updatedMaster: TaskMaster = {
+      ...old,
       ...data,
       updatedAt: new Date().toISOString(),
     };
 
-    const updatedList = taskMasters.map((t) => (t.id === id ? updatedTask : t));
-    storage.saveTaskMasters(updatedList);
-    setTaskMasters(updatedList);
+    const newMasters = [...taskMasters];
+    newMasters[index] = updatedMaster;
+    storage.saveTaskMasters(newMasters);
+    setTaskMasters(newMasters);
 
-    // If rescheduling future occurrences
+    // If future tasks need updating (assigned user, department, checklist name)
     if (rescheduleOptions?.applyToFutureOnly) {
-      const updatedSchedules = scheduledTasks.map((sch) => {
-        if (sch.taskMasterId === id && !sch.completedAt && sch.dueDate >= todayStr) {
+      const updatedSchedules = scheduledTasks.map((st) => {
+        if (st.taskMasterId === id && !st.completedAt && st.dueDate >= todayStr) {
           return {
-            ...sch,
-            taskName: updatedTask.taskName,
-            assignedUserId: updatedTask.assignedUserId,
-            assignedUserName: updatedTask.assignedUserName,
-            assignedEmployeeId: updatedTask.assignedEmployeeId,
-            departmentId: updatedTask.departmentId,
-            departmentName: updatedTask.departmentName,
-            priority: updatedTask.priority,
-            instructions: updatedTask.instructions,
-            frequencyDisplay: getFrequencySummary(updatedTask.frequencyType, updatedTask.frequencyValue, updatedTask.weeklyDay),
+            ...st,
+            taskName: updatedMaster.taskName,
+            assignedUserId: updatedMaster.assignedUserId,
+            assignedUserName: updatedMaster.assignedUserName,
+            assignedEmployeeId: updatedMaster.assignedEmployeeId,
+            departmentId: updatedMaster.departmentId,
+            departmentName: updatedMaster.departmentName,
+            checklistTemplateId: updatedMaster.checklistTemplateId,
+            checklistName: updatedMaster.checklistName,
+            priority: updatedMaster.priority,
+            instructions: updatedMaster.instructions,
           };
         }
-        return sch;
+        return st;
       });
+
       storage.saveScheduledTasks(updatedSchedules);
       setScheduledTasks(updatedSchedules);
     }
@@ -263,166 +281,119 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userName: currentUser?.name || 'Admin',
       role: currentUser?.role || 'admin',
       recordType: 'TaskMaster',
-      recordId: target.taskCode,
-      reason: `Updated master properties for ${target.taskName}.`,
-      previousData: oldData,
-      newData: updatedTask,
+      recordId: old.taskCode,
+      previousData: old,
+      newData: updatedMaster,
+      reason: `Updated machine task master ${updatedMaster.taskName}`,
     });
 
-    return { success: true, message: 'Task Master updated successfully.' };
+    return { success: true, message: 'Machine Task Master updated successfully.' };
   };
 
-  // Deactivate Task Master
   const deactivateTaskMaster = (id: string) => {
-    const target = taskMasters.find((t) => t.id === id);
-    if (!target) return { success: false, message: 'Task not found.' };
-
-    const updated = taskMasters.map((t) => (t.id === id ? { ...t, status: 'deactivated' as const } : t));
-    storage.saveTaskMasters(updated);
-    setTaskMasters(updated);
-
-    // Cancel open future tasks
-    const updatedSchedules = scheduledTasks.map((sch) => {
-      if (sch.taskMasterId === id && !sch.completedAt && sch.dueDate >= todayStr) {
-        return { ...sch, status: 'cancelled' as const };
-      }
-      return sch;
-    });
-    storage.saveScheduledTasks(updatedSchedules);
-    setScheduledTasks(updatedSchedules);
-
-    storage.addAuditLog({
-      action: 'TASK_MASTER_DEACTIVATED',
-      userId: currentUser?.id || 'sys',
-      userName: currentUser?.name || 'Admin',
-      role: currentUser?.role || 'admin',
-      recordType: 'TaskMaster',
-      recordId: target.taskCode,
-      reason: `Deactivated task master. Future occurrences marked cancelled; completed history preserved.`,
-    });
-
-    return { success: true, message: 'Task Master deactivated. Future occurrences cancelled.' };
+    return updateTaskMaster(id, { status: 'inactive' });
   };
 
-  // Safe delete
   const deleteTaskMasterSafe = (id: string, cancelFutureOnly: boolean = true) => {
-    const target = taskMasters.find((t) => t.id === id);
-    if (!target) return { success: false, message: 'Task not found.' };
+    const master = taskMasters.find((t) => t.id === id);
+    if (!master) return { success: false, message: 'Task Master not found.' };
 
     const hasCompleted = scheduledTasks.some((s) => s.taskMasterId === id && s.completedAt);
+
     if (hasCompleted) {
-      // Must soft-deactivate to protect historical audit trail
-      deactivateTaskMaster(id);
+      // Soft-deactivate to protect historic audit records
+      const newMasters = taskMasters.map((t) => (t.id === id ? { ...t, status: 'deactivated' as const } : t));
+      storage.saveTaskMasters(newMasters);
+      setTaskMasters(newMasters);
+
+      if (cancelFutureOnly) {
+        const updatedSchedules = scheduledTasks.map((s) => {
+          if (s.taskMasterId === id && !s.completedAt && s.dueDate >= todayStr) {
+            return { ...s, status: 'cancelled' as const };
+          }
+          return s;
+        });
+        storage.saveScheduledTasks(updatedSchedules);
+        setScheduledTasks(updatedSchedules);
+      }
+
+      storage.addAuditLog({
+        action: 'TASK_MASTER_DEACTIVATED',
+        userId: currentUser?.id || 'sys',
+        userName: currentUser?.name || 'Admin',
+        role: currentUser?.role || 'admin',
+        recordType: 'TaskMaster',
+        recordId: master.taskCode,
+        reason: 'Task Master marked as deactivated to preserve completed audit records.',
+      });
+
       return {
         success: true,
-        message: 'Task has historical completion records. Deactivated and cancelled future occurrences to protect audit history.',
+        message: 'Task Master deactivated and future occurrences cancelled. Historic completion data was preserved.',
       };
+    } else {
+      // Hard delete if no completions exist
+      const newMasters = taskMasters.filter((t) => t.id !== id);
+      const newSchedules = scheduledTasks.filter((s) => s.taskMasterId !== id);
+      storage.saveTaskMasters(newMasters);
+      storage.saveScheduledTasks(newSchedules);
+      setTaskMasters(newMasters);
+      setScheduledTasks(newSchedules);
+
+      return { success: true, message: 'Task Master and schedule deleted.' };
     }
-
-    // No historical completions: safe to delete cleanly
-    const updatedTms = taskMasters.filter((t) => t.id !== id);
-    storage.saveTaskMasters(updatedTms);
-    setTaskMasters(updatedTms);
-
-    const updatedSchedules = scheduledTasks.filter((s) => s.taskMasterId !== id);
-    storage.saveScheduledTasks(updatedSchedules);
-    setScheduledTasks(updatedSchedules);
-
-    storage.addAuditLog({
-      action: 'TASK_MASTER_DELETED',
-      userId: currentUser?.id || 'sys',
-      userName: currentUser?.name || 'Admin',
-      role: currentUser?.role || 'admin',
-      recordType: 'TaskMaster',
-      recordId: target.taskCode,
-      reason: `Deleted master record and uncompleted schedules for ${target.taskName}.`,
-    });
-
-    return { success: true, message: 'Task Master deleted successfully.' };
   };
 
-  // One-Year Schedule Generator
-  const generateOneYearSchedule = (taskMasterId: string, customMonths?: number) => {
-    const tm = taskMasters.find((t) => t.id === taskMasterId);
-    if (!tm) return { success: false, count: 0, message: 'Task Master not found.' };
-
-    const horizon = customMonths || settings.defaultScheduleHorizonMonths || 12;
-    const generatedDates = generateScheduleDates(
-      {
-        startDate: tm.startDate,
-        frequencyType: tm.frequencyType,
-        frequencyValue: tm.frequencyValue,
-        weeklyDay: tm.weeklyDay,
-      },
-      {
-        horizonMonths: horizon,
-        invalidMonthlyDatePolicy: settings.invalidMonthlyDatePolicy,
-      }
-    );
-
-    // Check duplicates: taskMasterId + dueDate
-    const existingDates = new Set(
-      scheduledTasks.filter((s) => s.taskMasterId === taskMasterId).map((s) => s.dueDate)
-    );
-
-    const newSchedules: ScheduledTask[] = [];
+  // 17-Day Dual Rotation Scheduling Engine
+  const generateYflRotationSchedule = (options?: {
+    startDate?: string;
+    durationDays?: number;
+    horizonMonths?: number;
+    skipHolidays?: boolean;
+    skipSundays?: boolean;
+  }) => {
+    const startDate = options?.startDate || '2026-07-04';
+    const durationDays = options?.durationDays || (options?.horizonMonths ? options.horizonMonths * 30 : 365);
+    const skipHolidays = options?.skipHolidays ?? (settings.holidayPolicy === 'skip_and_shift');
+    const skipSundays = options?.skipSundays ?? settings.skipSundays ?? true;
     const advanceDays = settings.taskAdvanceVisibilityDays || 5;
 
-    generatedDates.forEach((dueDate) => {
-      if (!existingDates.has(dueDate)) {
-        const scheduleId = `SCH-${tm.taskCode}-${dueDate.replace(/-/g, '')}`;
-        const visDate = calculateVisibilityDate(dueDate, advanceDays);
-
-        let initialStatus: ScheduledTask['status'] = 'future';
-        if (dueDate < todayStr) initialStatus = 'overdue';
-        else if (dueDate === todayStr) initialStatus = 'due_today';
-        else if (visDate <= todayStr) initialStatus = 'available';
-
-        newSchedules.push({
-          id: scheduleId,
-          scheduleId,
-          taskMasterId: tm.id,
-          taskCode: tm.taskCode,
-          taskName: tm.taskName,
-          checklistTemplateId: tm.checklistTemplateId,
-          checklistName: tm.checklistName,
-          assignedUserId: tm.assignedUserId,
-          assignedUserName: tm.assignedUserName,
-          assignedEmployeeId: tm.assignedEmployeeId,
-          departmentId: tm.departmentId,
-          departmentName: tm.departmentName,
-          frequencyType: tm.frequencyType,
-          frequencyValue: tm.frequencyValue,
-          frequencyDisplay: getFrequencySummary(tm.frequencyType, tm.frequencyValue, tm.weeklyDay),
-          originalStartDate: tm.startDate,
-          dueDate,
-          visibilityDate: visDate,
-          status: initialStatus,
-          priority: tm.priority,
-          instructions: tm.instructions,
-          generatedBy: currentUser?.loginId || 'Admin',
-          generatedDate: todayStr,
-        });
-      }
-    });
-
-    if (newSchedules.length === 0) {
-      return {
-        success: true,
-        count: 0,
-        message: `Schedule already generated through ${generatedDates[generatedDates.length - 1]}. No missing dates found.`,
-      };
+    const activeMasters = taskMasters.filter((t) => t.status === 'active');
+    if (activeMasters.length === 0) {
+      return { success: false, message: 'No active Task Masters found in Yarn Division.' };
     }
 
-    const merged = [...scheduledTasks, ...newSchedules];
+    const engineResult = generateYflDualRotationSchedule(activeMasters, {
+      startDate,
+      durationDays,
+      holidays,
+      skipHolidays,
+      skipSundays,
+      advanceDays,
+    });
+
+    // Retain previously completed tasks to protect audit trail
+    const completedTasks = scheduledTasks.filter((s) => s.completedAt);
+    const completedKeySet = new Set(completedTasks.map((s) => `${s.taskMasterId}_${s.dueDate}`));
+
+    const freshSchedules = engineResult.scheduledTasks
+      .filter((s) => !completedKeySet.has(`${s.taskMasterId}_${s.dueDate}`))
+      .map((s) => {
+        let initialStatus: ScheduledTask['status'] = 'future';
+        if (s.dueDate < todayStr) initialStatus = 'overdue';
+        else if (s.dueDate === todayStr) initialStatus = 'due_today';
+        else if (s.visibilityDate <= todayStr) initialStatus = 'available';
+        return { ...s, status: initialStatus };
+      });
+
+    const merged = [...completedTasks, ...freshSchedules].sort((a, b) => a.dueDate.localeCompare(b.dueDate));
     storage.saveScheduledTasks(merged);
     setScheduledTasks(merged);
 
-    // Update last generated through date
-    const lastDate = generatedDates[generatedDates.length - 1];
-    const updatedTms = taskMasters.map((t) => (t.id === tm.id ? { ...t, lastScheduleGeneratedThrough: lastDate } : t));
-    storage.saveTaskMasters(updatedTms);
-    setTaskMasters(updatedTms);
+    // Update masters with last generated through date
+    const updatedMasters = taskMasters.map((t) => ({ ...t, lastScheduleGeneratedThrough: engineResult.endDate }));
+    storage.saveTaskMasters(updatedMasters);
+    setTaskMasters(updatedMasters);
 
     storage.addAuditLog({
       action: 'SCHEDULE_GENERATED',
@@ -430,33 +401,53 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       userName: currentUser?.name || 'Admin',
       role: currentUser?.role || 'admin',
       recordType: 'MasterSchedule',
-      recordId: tm.taskCode,
-      reason: `Generated ${newSchedules.length} new occurrences for ${tm.taskName} through ${lastDate}.`,
+      recordId: 'YFL-17DAY-ROTATION',
+      reason: `Generated ${freshSchedules.length} dual-group rotation task occurrences (${engineResult.totalWorkingDays} working days, Sunday skipped) from ${startDate} through ${engineResult.endDate}.`,
     });
 
     return {
       success: true,
-      count: newSchedules.length,
-      message: `Generated ${newSchedules.length} scheduled occurrences through ${lastDate}.`,
+      result: engineResult,
+      message: `Successfully generated ${freshSchedules.length} machine maintenance tasks across ${engineResult.totalWorkingDays} working days through ${engineResult.endDate}.`,
     };
   };
 
-  // Extend Schedule (+3 mo, +6 mo, +1 yr)
-  const extendSchedule = (taskMasterId: string, monthsToAdd: number) => {
-    return generateOneYearSchedule(taskMasterId, 12 + monthsToAdd);
-  };
-
-  // Bulk generate
-  const bulkGenerateSchedules = (taskMasterIds: string[]) => {
-    let total = 0;
-    taskMasterIds.forEach((id) => {
-      const res = generateOneYearSchedule(id);
-      total += res.count;
+  const generateOneYearSchedule = (customStartDate?: string) => {
+    const res = generateYflRotationSchedule({
+      startDate: customStartDate || '2026-07-04',
+      durationDays: 365,
+      skipHolidays: true,
+      skipSundays: true,
     });
-    return { success: true, totalCount: total, message: `Successfully generated ${total} occurrences across selected tasks.` };
+    return {
+      success: res.success,
+      count: res.result?.totalTaskRecords || 0,
+      message: res.message,
+    };
   };
 
-  // Mark task as done
+  const extendSchedule = (monthsToAdd: number) => {
+    const currentEnd = scheduledTasks[scheduledTasks.length - 1]?.dueDate || '2026-07-04';
+    const res = generateYflRotationSchedule({
+      startDate: '2026-07-04',
+      durationDays: 365 + monthsToAdd * 30,
+    });
+    return {
+      success: res.success,
+      count: res.result?.totalTaskRecords || 0,
+      message: res.message,
+    };
+  };
+
+  const bulkGenerateSchedules = () => {
+    return generateOneYearSchedule('2026-07-04');
+  };
+
+  const generateSequentialSchedule = (options?: any) => {
+    return generateOneYearSchedule(options?.startDate || '2026-07-04');
+  };
+
+  // Task Completion (Individual Machine Support)
   const markTaskAsDone = (
     scheduleId: string,
     data: {
@@ -468,80 +459,61 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       overrideCompletionDate?: string;
     }
   ) => {
-    const target = scheduledTasks.find((s) => s.id === scheduleId);
-    if (!target) return { success: false, message: 'Scheduled task not found.' };
-
-    if (target.completedAt) {
-      return { success: false, message: 'This task has already been completed.' };
+    const taskIndex = scheduledTasks.findIndex((s) => s.id === scheduleId || s.scheduleId === scheduleId);
+    if (taskIndex === -1) {
+      return { success: false, message: 'Scheduled task not found' };
     }
 
-    // Role check: Doer can only complete their own tasks
-    if (currentUser?.role === 'doer' && target.assignedUserId !== currentUser.id) {
-      return { success: false, message: 'You are not authorized to complete another employee’s assigned task.' };
-    }
-
+    const task = scheduledTasks[taskIndex];
     const completionDate = data.overrideCompletionDate || todayStr;
-    const now = new Date();
-    const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:${now.getSeconds().toString().padStart(2, '0')}`;
-    const completedAt = `${completionDate}T${timeStr}Z`;
+    const nowIso = new Date().toISOString();
+    const timeStr = format(new Date(), 'HH:mm:ss');
 
-    const evalResult = evaluateTaskCompletion(target.dueDate, completionDate, settings.scoreRules);
-    let newStatus: ScheduledTask['status'] = 'completed_on_time';
-    if (evalResult.classification === 'early') newStatus = 'completed_early';
-    if (evalResult.classification === 'late') newStatus = 'completed_late';
+    const evalResult = evaluateTaskCompletion(task.dueDate, completionDate, settings.scoreRules);
 
-    const updatedTask: ScheduledTask = {
-      ...target,
-      status: newStatus,
-      completedAt,
+    let finalStatus: ScheduledTask['status'] = 'completed_on_time';
+    if (evalResult.classification === 'early') finalStatus = 'completed_early';
+    if (evalResult.classification === 'late') finalStatus = 'completed_late';
+
+    const completedTask: ScheduledTask = {
+      ...task,
+      status: finalStatus,
+      completedAt: nowIso,
       completedDate: completionDate,
       completedTime: timeStr,
       completionClassification: evalResult.classification,
       delayDays: evalResult.delayDays,
       score: evalResult.score,
-      remarks: data.remarks || 'Completed with all verification checks satisfied.',
-      observation: data.observation,
-      correctiveAction: data.correctiveAction,
-      checklistResponses: data.checklistResponses,
-      evidenceUrls: data.evidenceUrls,
+      remarks: data.remarks || '',
+      observation: data.observation || '',
+      correctiveAction: data.correctiveAction || '',
+      checklistResponses: data.checklistResponses || [],
+      evidenceUrls: data.evidenceUrls || [],
     };
 
-    const updatedList = scheduledTasks.map((s) => (s.id === scheduleId ? updatedTask : s));
-    storage.saveScheduledTasks(updatedList);
-    setScheduledTasks(updatedList);
+    const updatedTasks = [...scheduledTasks];
+    updatedTasks[taskIndex] = completedTask;
 
-    // Audit log
+    storage.saveScheduledTasks(updatedTasks);
+    setScheduledTasks(updatedTasks);
+
     storage.addAuditLog({
       action: 'TASK_COMPLETED',
       userId: currentUser?.id || 'sys',
       userName: currentUser?.name || 'Doer',
       role: currentUser?.role || 'doer',
       recordType: 'ScheduledTask',
-      recordId: target.scheduleId,
-      reason: `Task ${target.taskName} marked Done (${evalResult.classification.toUpperCase()}, Delay: ${evalResult.delayDays}d, Score: ${evalResult.score}pts).`,
-      newData: updatedTask,
+      recordId: task.scheduleId,
+      reason: `Completed ${task.taskName} (${finalStatus.replace('completed_', '').replace('_', ' ')}) with score ${evalResult.score}.`,
     });
 
-    // In-app notification for admin
-    const newNotif: NotificationItem = {
-      id: `notif-${Date.now()}`,
-      userId: 'user-admin-1',
-      title: 'Task Completed',
-      message: `${target.taskName} maintenance completed by ${currentUser?.name || target.assignedUserName} (${evalResult.classification}, Score: ${evalResult.score}).`,
-      type: 'success',
-      isRead: false,
-      createdAt: new Date().toISOString(),
-      relatedScheduleId: target.id,
-      relatedTaskCode: target.taskCode,
+    return {
+      success: true,
+      task: completedTask,
+      message: `Machine task ${task.taskName} marked as completed (${evalResult.classification.toUpperCase()}). Score: ${evalResult.score}`,
     };
-    const updatedNotifs = [newNotif, ...notifications];
-    storage.saveNotifications(updatedNotifs);
-    setNotifications(updatedNotifs);
-
-    return { success: true, message: 'Task completed successfully! Score recorded.', task: updatedTask };
   };
 
-  // Admin correction
   const adminCorrectCompletion = (
     scheduleId: string,
     data: {
@@ -551,240 +523,140 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       remarks?: string;
     }
   ) => {
-    if (currentUser?.role !== 'admin') {
-      return { success: false, message: 'Only administrators are authorized to perform completion corrections.' };
-    }
+    const taskIndex = scheduledTasks.findIndex((s) => s.id === scheduleId || s.scheduleId === scheduleId);
+    if (taskIndex === -1) return { success: false, message: 'Task not found' };
 
-    const target = scheduledTasks.find((s) => s.id === scheduleId);
-    if (!target) return { success: false, message: 'Task not found.' };
-
-    const oldStatus = target.status;
-    const oldScore = target.score;
-
-    const updatedTask: ScheduledTask = {
-      ...target,
+    const old = scheduledTasks[taskIndex];
+    const updated: ScheduledTask = {
+      ...old,
       status: data.newStatus,
-      score: data.newScore !== undefined ? data.newScore : target.score,
-      remarks: data.remarks || target.remarks,
+      score: data.newScore !== undefined ? data.newScore : old.score,
+      remarks: data.remarks || old.remarks,
       adminCorrection: {
-        correctedBy: currentUser.id,
-        correctedByName: currentUser.name,
+        correctedBy: currentUser?.id || 'admin',
+        correctedByName: currentUser?.name || 'Admin',
         correctedAt: new Date().toISOString(),
         reason: data.reason,
-        oldStatus,
+        oldStatus: old.status,
         newStatus: data.newStatus,
-        oldScore,
+        oldScore: old.score,
         newScore: data.newScore,
       },
     };
 
-    const updatedList = scheduledTasks.map((s) => (s.id === scheduleId ? updatedTask : s));
-    storage.saveScheduledTasks(updatedList);
-    setScheduledTasks(updatedList);
+    const nextTasks = [...scheduledTasks];
+    nextTasks[taskIndex] = updated;
+    storage.saveScheduledTasks(nextTasks);
+    setScheduledTasks(nextTasks);
 
     storage.addAuditLog({
-      action: 'ADMIN_COMPLETION_CORRECTION',
-      userId: currentUser.id,
-      userName: currentUser.name,
+      action: 'ADMIN_CORRECTION',
+      userId: currentUser?.id || 'admin',
+      userName: currentUser?.name || 'Admin',
       role: 'admin',
       recordType: 'ScheduledTask',
-      recordId: target.scheduleId,
-      reason: `Admin correction applied. Reason: ${data.reason}`,
-      previousData: { status: oldStatus, score: oldScore },
-      newData: { status: data.newStatus, score: data.newScore },
+      recordId: old.scheduleId,
+      reason: `Admin correction on ${old.taskName}: ${data.reason}`,
     });
 
-    return { success: true, message: 'Admin completion correction applied and logged.' };
+    return { success: true, message: 'Task completion corrected by admin.' };
+  };
+
+  // Holiday management
+  const addHoliday = (holidayData: Omit<Holiday, 'id' | 'createdAt'>) => {
+    const newHoliday: Holiday = {
+      ...holidayData,
+      id: `hol-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    const updated = [...holidays, newHoliday].sort((a, b) => a.date.localeCompare(b.date));
+    storage.saveHolidays(updated);
+    setHolidays(updated);
+
+    storage.addAuditLog({
+      action: 'HOLIDAY_ADDED',
+      userId: currentUser?.id || 'admin',
+      userName: currentUser?.name || 'Admin',
+      role: 'admin',
+      recordType: 'Holiday',
+      recordId: newHoliday.date,
+      reason: `Added holiday: ${newHoliday.name} on ${newHoliday.date}`,
+    });
+
+    return { success: true, message: `Holiday "${newHoliday.name}" added successfully.` };
+  };
+
+  const updateHoliday = (id: string, data: Partial<Holiday>) => {
+    const updated = holidays.map((h) => (h.id === id ? { ...h, ...data } : h));
+    storage.saveHolidays(updated);
+    setHolidays(updated);
+    return { success: true, message: 'Holiday updated successfully.' };
+  };
+
+  const deleteHoliday = (id: string) => {
+    const target = holidays.find((h) => h.id === id);
+    const updated = holidays.filter((h) => h.id !== id);
+    storage.saveHolidays(updated);
+    setHolidays(updated);
+
+    if (target) {
+      storage.addAuditLog({
+        action: 'HOLIDAY_DELETED',
+        userId: currentUser?.id || 'admin',
+        userName: currentUser?.name || 'Admin',
+        role: 'admin',
+        recordType: 'Holiday',
+        recordId: target.date,
+        reason: `Removed holiday: ${target.name} (${target.date})`,
+      });
+    }
+
+    return { success: true, message: 'Holiday removed successfully.' };
   };
 
   // User management
   const addUser = (userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const existing = users.find(
-      (u) => u.loginId.toLowerCase() === userData.loginId.toLowerCase() || u.employeeId.toLowerCase() === userData.employeeId.toLowerCase()
-    );
-    if (existing) {
-      return { success: false, message: 'A user with this Login ID or Employee ID already exists.' };
-    }
-
     const newUser: User = {
       ...userData,
       id: `user-${Date.now()}`,
-      mustChangePassword: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-
     const updated = [...users, newUser];
     storage.saveUsers(updated);
     setUsers(updated);
-
-    storage.addAuditLog({
-      action: 'USER_CREATED',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'User',
-      recordId: newUser.employeeId,
-      reason: `Registered new employee ${newUser.name} (${newUser.designation}).`,
-    });
-
-    return { success: true, user: newUser, message: 'New employee registered successfully.' };
+    return { success: true, user: newUser, message: 'User created successfully.' };
   };
 
   const updateUser = (userId: string, data: Partial<User>) => {
-    const target = users.find((u) => u.id === userId);
-    if (!target) return { success: false, message: 'User not found.' };
-
-    const updatedUser = { ...target, ...data, updatedAt: new Date().toISOString() };
-    const updatedList = users.map((u) => (u.id === userId ? updatedUser : u));
-    storage.saveUsers(updatedList);
-    setUsers(updatedList);
-
-    storage.addAuditLog({
-      action: 'USER_UPDATED',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'User',
-      recordId: target.employeeId,
-      reason: `Updated details for ${target.name}.`,
-    });
-
-    return { success: true, message: 'Employee updated successfully.' };
+    const updated = users.map((u) => (u.id === userId ? { ...u, ...data, updatedAt: new Date().toISOString() } : u));
+    storage.saveUsers(updated);
+    setUsers(updated);
+    return { success: true, message: 'User updated successfully.' };
   };
 
   const toggleUserStatus = (userId: string) => {
-    const target = users.find((u) => u.id === userId);
-    if (!target) return { success: false, status: 'active', message: 'User not found.' };
-    if (target.id === currentUser?.id) {
-      return { success: false, status: target.status, message: 'You cannot suspend your own account.' };
-    }
-
-    const newStatus: 'active' | 'suspended' = target.status === 'active' ? 'suspended' : 'active';
-    const updated = users.map((u) => (u.id === userId ? { ...u, status: newStatus, updatedAt: new Date().toISOString() } : u));
-    storage.saveUsers(updated);
-    setUsers(updated);
-
-    storage.addAuditLog({
-      action: newStatus === 'suspended' ? 'USER_SUSPENDED' : 'USER_REACTIVATED',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'User',
-      recordId: target.employeeId,
-      reason: `Employee account status set to ${newStatus}. Historical data preserved.`,
-    });
-
-    return { success: true, status: newStatus, message: `Employee account ${newStatus}.` };
+    const user = users.find((u) => u.id === userId);
+    if (!user) return { success: false, status: 'active', message: 'User not found' };
+    const nextStatus: User['status'] = user.status === 'active' ? 'suspended' : 'active';
+    updateUser(userId, { status: nextStatus });
+    return { success: true, status: nextStatus, message: `User status changed to ${nextStatus}.` };
   };
 
   const resetUserPassword = (userId: string) => {
-    const target = users.find((u) => u.id === userId);
-    if (!target) return { success: false, newPass: '', message: 'User not found.' };
+    const defaultNewPass = 'User@1234';
+    updateUser(userId, { password: defaultNewPass, mustChangePassword: true });
+    return { success: true, newPass: defaultNewPass, message: 'Password reset to default User@1234.' };
+  };
 
-    const tempPassword = 'User@1234';
-    const updated = users.map((u) =>
-      u.id === userId ? { ...u, password: tempPassword, mustChangePassword: true, updatedAt: new Date().toISOString() } : u
-    );
+  const deleteUser = (userId: string) => {
+    const updated = users.filter((u) => u.id !== userId);
     storage.saveUsers(updated);
     setUsers(updated);
-
-    storage.addAuditLog({
-      action: 'PASSWORD_RESET_BY_ADMIN',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'User',
-      recordId: target.employeeId,
-      reason: `Administrator reset password for ${target.name} to default initial password.`,
-    });
-
-    return { success: true, newPass: tempPassword, message: `Password reset to ${tempPassword}. User must change on next login.` };
+    return { success: true, message: 'User deleted.' };
   };
 
-  const deleteUser = (userId: string, reassignToUserId?: string) => {
-    if (currentUser?.role !== 'admin') {
-      return { success: false, message: 'Only administrators can delete user accounts.' };
-    }
-    const target = users.find((u) => u.id === userId);
-    if (!target) return { success: false, message: 'User not found.' };
-    if (target.id === currentUser?.id) {
-      return { success: false, message: 'You cannot delete your own logged-in admin account.' };
-    }
-
-    // Check if user has assigned task masters or schedules
-    const assignedMasters = taskMasters.filter((tm) => tm.assignedUserId === userId);
-    const assignedSchedules = scheduledTasks.filter((s) => s.assignedUserId === userId);
-
-    let reassignUser: User | undefined;
-    if (reassignToUserId) {
-      reassignUser = users.find((u) => u.id === reassignToUserId);
-    }
-
-    if (assignedMasters.length > 0 || assignedSchedules.length > 0) {
-      if (reassignUser) {
-        // Reassign task masters
-        const updatedMasters = taskMasters.map((tm) =>
-          tm.assignedUserId === userId
-            ? { ...tm, assignedUserId: reassignUser!.id, assignedUserName: reassignUser!.name, assignedUserEmpId: reassignUser!.employeeId }
-            : tm
-        );
-        storage.saveTaskMasters(updatedMasters);
-        setTaskMasters(updatedMasters);
-
-        // Reassign schedules
-        const updatedSchedules = scheduledTasks.map((s) =>
-          s.assignedUserId === userId
-            ? { ...s, assignedUserId: reassignUser!.id, assignedUserName: reassignUser!.name }
-            : s
-        );
-        storage.saveScheduledTasks(updatedSchedules);
-        setScheduledTasks(updatedSchedules);
-      } else {
-        // Mark as archived in tasks
-        const updatedMasters = taskMasters.map((tm) =>
-          tm.assignedUserId === userId
-            ? { ...tm, assignedUserName: `${target.name} (Archived)` }
-            : tm
-        );
-        storage.saveTaskMasters(updatedMasters);
-        setTaskMasters(updatedMasters);
-
-        const updatedSchedules = scheduledTasks.map((s) =>
-          s.assignedUserId === userId
-            ? { ...s, assignedUserName: `${target.name} (Archived)` }
-            : s
-        );
-        storage.saveScheduledTasks(updatedSchedules);
-        setScheduledTasks(updatedSchedules);
-      }
-    }
-
-    const updatedUsers = users.filter((u) => u.id !== userId);
-    storage.saveUsers(updatedUsers);
-    setUsers(updatedUsers);
-
-    storage.addAuditLog({
-      action: 'USER_DELETED',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'User',
-      recordId: target.employeeId,
-      reason: `Permanently deleted user account ${target.name} (${target.employeeId}).${
-        reassignUser ? ` Tasks reassigned to ${reassignUser.name}.` : ''
-      }`,
-    });
-
-    return {
-      success: true,
-      message: `User ${target.name} (${target.employeeId}) deleted successfully.${
-        reassignUser ? ` Tasks transferred to ${reassignUser.name}.` : ''
-      }`,
-    };
-  };
-
-  // Departments
+  // Department
   const addDepartment = (data: Omit<Department, 'id' | 'createdAt' | 'updatedAt'>) => {
     const newDept: Department = {
       ...data,
@@ -805,29 +677,26 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return { success: true, message: 'Department updated successfully.' };
   };
 
-  // Checklist Templates
+  // Checklist template
   const saveChecklistTemplate = (template: ChecklistTemplate) => {
-    const existing = checklistTemplates.some((t) => t.id === template.id);
+    const existingIndex = checklistTemplates.findIndex((c) => c.id === template.id);
     let updated: ChecklistTemplate[];
-    if (existing) {
-      updated = checklistTemplates.map((t) => (t.id === template.id ? { ...template, updatedAt: new Date().toISOString() } : t));
+    if (existingIndex >= 0) {
+      updated = [...checklistTemplates];
+      updated[existingIndex] = { ...template, updatedAt: new Date().toISOString() };
     } else {
-      updated = [...checklistTemplates, { ...template, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+      updated = [...checklistTemplates, { ...template, id: `chk-${Date.now()}`, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     }
     storage.saveChecklistTemplates(updated);
     setChecklistTemplates(updated);
-    return { success: true, message: 'Checklist template saved successfully.' };
+    return { success: true, message: 'Checklist template saved.' };
   };
 
   const deleteChecklistTemplate = (id: string) => {
-    const inUse = taskMasters.some((t) => t.checklistTemplateId === id);
-    if (inUse) {
-      return { success: false, message: 'Cannot delete template while it is assigned to existing Task Masters.' };
-    }
-    const updated = checklistTemplates.filter((t) => t.id !== id);
+    const updated = checklistTemplates.filter((c) => c.id !== id);
     storage.saveChecklistTemplates(updated);
     setChecklistTemplates(updated);
-    return { success: true, message: 'Checklist template removed.' };
+    return { success: true, message: 'Checklist template deleted.' };
   };
 
   // Settings
@@ -835,20 +704,9 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const updated = { ...settings, ...newSettings };
     storage.saveSettings(updated);
     setSettings(updated);
-    storage.addAuditLog({
-      action: 'SETTINGS_UPDATED',
-      userId: currentUser?.id || 'admin',
-      userName: currentUser?.name || 'Admin',
-      role: 'admin',
-      recordType: 'Settings',
-      recordId: 'global',
-      reason: 'Application configuration updated.',
-      newData: updated,
-    });
-    return { success: true, message: 'Settings saved.' };
+    return { success: true, message: 'System settings saved.' };
   };
 
-  // Notifications
   const markNotificationAsRead = (id: string) => {
     const updated = notifications.map((n) => (n.id === id ? { ...n, isRead: true } : n));
     storage.saveNotifications(updated);
@@ -861,53 +719,47 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setNotifications(updated);
   };
 
-  // Bulk import
   const bulkImportTasks = (rows: Array<Partial<TaskMaster>>) => {
-    const errors: string[] = [];
     const validTasks: TaskMaster[] = [];
-    const existingCodes = new Set(taskMasters.map((t) => t.taskCode.toLowerCase()));
+    const errors: string[] = [];
 
-    rows.forEach((r, idx) => {
-      const rowNum = idx + 1;
-      if (!r.taskName) {
-        errors.push(`Row ${rowNum}: Missing machine/task name.`);
+    rows.forEach((row, idx) => {
+      if (!row.taskName) {
+        errors.push(`Row ${idx + 1}: Missing machine task name`);
         return;
       }
-      const code = r.taskCode || `TM-${(taskMasters.length + validTasks.length + 1).toString().padStart(3, '0')}`;
-      if (existingCodes.has(code.toLowerCase())) {
-        errors.push(`Row ${rowNum}: Task Code '${code}' already exists.`);
-        return;
-      }
-
-      const assignedDoer = users.find((u) => u.id === r.assignedUserId) || users.find((u) => u.role === 'doer') || users[0];
-      const dept = departments.find((d) => d.id === r.departmentId) || departments[0];
-      const chk = checklistTemplates.find((c) => c.id === r.checklistTemplateId) || checklistTemplates[0];
+      const taskCode = row.taskCode || `TM-${(taskMasters.length + validTasks.length + 1).toString().padStart(3, '0')}`;
+      const rotGroup = row.rotationGroup || 'MC1';
+      const rotPos = row.rotationPosition || (validTasks.length + 1);
 
       validTasks.push({
-        id: `task-master-${Date.now()}-${idx}`,
-        taskCode: code,
-        taskName: r.taskName,
-        taskDescription: r.taskDescription || `Preventive maintenance for ${r.taskName}`,
-        checklistTemplateId: chk.id,
-        checklistName: chk.templateName,
-        assignedUserId: assignedDoer.id,
-        assignedUserName: assignedDoer.name,
-        assignedEmployeeId: assignedDoer.employeeId,
-        departmentId: dept.id,
-        departmentName: dept.departmentName,
-        taskCategory: r.taskCategory || 'Preventive Maintenance',
-        frequencyType: r.frequencyType || 'interval_days',
-        frequencyValue: r.frequencyValue || 15,
-        startDate: r.startDate || todayStr,
-        priority: r.priority || 'medium',
-        estimatedDuration: r.estimatedDuration || '45 mins',
-        instructions: r.instructions || 'Perform checklist items safely.',
+        id: `tm-imp-${Date.now()}-${idx}`,
+        taskId: row.taskId || (validTasks.length + 1),
+        machineId: `M-${taskCode}`,
+        machineName: row.taskName,
+        taskCode,
+        taskName: row.taskName,
+        taskDescription: row.taskDescription || `Preventive maintenance for ${row.taskName}`,
+        checklistTemplateId: row.checklistTemplateId || 'chk-machine-maint',
+        checklistName: row.checklistName || 'Machine Maintenance Checklist',
+        assignedUserId: row.assignedUserId || 'user-doer-1',
+        assignedUserName: row.assignedUserName || 'Swapan Kr Ghorai',
+        assignedEmployeeId: row.assignedEmployeeId || 'YFL-084',
+        departmentId: row.departmentId || 'dept-yarn-1',
+        departmentName: row.departmentName || 'Yarn Division',
+        rotationGroup: rotGroup,
+        rotationPosition: rotPos,
+        scheduleType: '17-Day Dual Rotation',
+        frequencyType: 'sequential_rotation',
+        frequencyValue: 2,
+        startDate: row.startDate || '2026-07-04',
+        priority: row.priority || 'medium',
         status: 'active',
-        createdBy: currentUser?.loginId || 'admin',
+        taskCategory: row.taskCategory || 'Machinery Maintenance',
+        createdBy: currentUser?.name || 'Admin',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       });
-      existingCodes.add(code.toLowerCase());
     });
 
     if (validTasks.length > 0) {
@@ -922,7 +774,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
         role: 'admin',
         recordType: 'TaskMaster',
         recordId: `Batch-${Date.now()}`,
-        reason: `Bulk imported ${validTasks.length} task masters from CSV/data.`,
+        reason: `Bulk imported ${validTasks.length} task masters.`,
       });
     }
 
@@ -948,16 +800,22 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
         settings,
         notifications,
         auditLogs,
+        holidays,
         todayStr,
         addTaskMaster,
         updateTaskMaster,
         deactivateTaskMaster,
         deleteTaskMasterSafe,
+        generateYflRotationSchedule,
         generateOneYearSchedule,
         extendSchedule,
         bulkGenerateSchedules,
+        generateSequentialSchedule,
         markTaskAsDone,
         adminCorrectCompletion,
+        addHoliday,
+        updateHoliday,
+        deleteHoliday,
         addUser,
         updateUser,
         toggleUserStatus,

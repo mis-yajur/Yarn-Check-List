@@ -3,12 +3,14 @@ import {
   AuditLog,
   ChecklistTemplate,
   Department,
+  Holiday,
   NotificationItem,
+  RotationGroup,
   ScheduledTask,
   TaskMaster,
   User,
 } from '../types';
-import { calculateVisibilityDate, generateScheduleDates, getFrequencySummary } from './recurrenceEngine';
+import { generateYflDualRotationSchedule } from './recurrenceEngine';
 import { DEFAULT_RATING_THRESHOLDS, DEFAULT_SCORE_RULES, evaluateTaskCompletion } from './scoringEngine';
 
 const STORAGE_PREFIX = 'yfl_taskms_';
@@ -19,8 +21,8 @@ export const INITIAL_DEPARTMENT: Department = {
   departmentName: 'Yarn Division',
   description: 'Primary yarn spinning, carding, drawing, combing and polishing division.',
   status: 'active',
-  createdAt: '2026-08-01T09:00:00Z',
-  updatedAt: '2026-08-01T09:00:00Z',
+  createdAt: '2026-07-01T09:00:00Z',
+  updatedAt: '2026-07-01T09:00:00Z',
 };
 
 export const INITIAL_USERS: User[] = [
@@ -38,8 +40,8 @@ export const INITIAL_USERS: User[] = [
     status: 'active',
     mustChangePassword: false,
     password: 'Admin@1234',
-    createdAt: '2026-08-01T09:00:00Z',
-    updatedAt: '2026-08-01T09:00:00Z',
+    createdAt: '2026-07-01T09:00:00Z',
+    updatedAt: '2026-07-01T09:00:00Z',
     lastLogin: '2026-09-07T06:30:00Z',
   },
   {
@@ -56,38 +58,20 @@ export const INITIAL_USERS: User[] = [
     status: 'active',
     mustChangePassword: false,
     password: 'User@1234',
-    createdAt: '2026-08-15T09:00:00Z',
-    updatedAt: '2026-08-15T09:00:00Z',
+    createdAt: '2026-07-01T09:00:00Z',
+    updatedAt: '2026-07-01T09:00:00Z',
     lastLogin: '2026-09-07T07:15:00Z',
   },
-  {
-    id: 'user-doer-2',
-    employeeId: 'YFL-102',
-    name: 'Ramesh Das',
-    loginId: 'ramesh',
-    email: 'ramesh.das@yajurfibres.com',
-    mobile: '+91 98450 11223',
-    departmentId: 'dept-yarn-1',
-    departmentName: 'Yarn Division',
-    designation: 'Electrical & Instrumentation Tech',
-    role: 'doer',
-    status: 'active',
-    mustChangePassword: false,
-    password: 'User@1234',
-    createdAt: '2026-08-20T09:00:00Z',
-    updatedAt: '2026-08-20T09:00:00Z',
-    lastLogin: '2026-09-06T14:20:00Z',
-  }
 ];
 
 export const INITIAL_CHECKLIST_TEMPLATE: ChecklistTemplate = {
   id: 'chk-machine-maint',
-  templateName: 'Machine Maintenance',
+  templateName: 'Machine Maintenance Checklist',
   departmentId: 'dept-yarn-1',
   taskCategory: 'Preventive Maintenance',
   isActive: true,
-  createdAt: '2026-08-01T09:00:00Z',
-  updatedAt: '2026-08-01T09:00:00Z',
+  createdAt: '2026-07-01T09:00:00Z',
+  updatedAt: '2026-07-01T09:00:00Z',
   items: [
     { id: 'item-1', label: 'Machine cleaning', description: 'Remove accumulated lint, fluff, and fly waste', isRequired: true, displayOrder: 1 },
     { id: 'item-2', label: 'Lubrication check', description: 'Verify grease and lubricant points on main bearings', isRequired: true, displayOrder: 2 },
@@ -103,12 +87,25 @@ export const INITIAL_CHECKLIST_TEMPLATE: ChecklistTemplate = {
   ],
 };
 
+export const INITIAL_HOLIDAYS: Holiday[] = [
+  { id: 'hol-1', date: '2026-08-15', name: 'Independence Day', departmentName: 'Yarn Division', remarks: 'National Holiday' },
+  { id: 'hol-2', date: '2026-10-02', name: 'Gandhi Jayanti', departmentName: 'Yarn Division', remarks: 'National Holiday' },
+  { id: 'hol-3', date: '2026-10-20', name: 'Durga Puja / Dussehra', departmentName: 'Yarn Division', remarks: 'Festival Holiday' },
+  { id: 'hol-4', date: '2026-11-08', name: 'Diwali', departmentName: 'Yarn Division', remarks: 'Festival Holiday' },
+  { id: 'hol-5', date: '2027-01-26', name: 'Republic Day', departmentName: 'Yarn Division', remarks: 'National Holiday' },
+  { id: 'hol-6', date: '2027-03-23', name: 'Holi', departmentName: 'Yarn Division', remarks: 'Festival Holiday' },
+];
+
 export const INITIAL_SETTINGS: AppSettings = {
   companyName: 'Yajur Fibres Limited',
+  divisionName: 'Yarn Division',
   appName: 'YFL Yarn Division Checklist & Task Management System',
+  appTitle: 'Yajur Fibres Limited • Yarn Division Maintenance System',
   tagline: 'Plan • Maintain • Track • Improve',
   department: 'Yarn Division',
   timezone: 'Asia/Kolkata',
+  skipSundays: true,
+  holidayPolicy: 'skip_and_shift',
   taskAdvanceVisibilityDays: 5,
   defaultScheduleHorizonMonths: 12,
   invalidMonthlyDatePolicy: 'last_day',
@@ -117,49 +114,62 @@ export const INITIAL_SETTINGS: AppSettings = {
   ratingThresholds: DEFAULT_RATING_THRESHOLDS,
 };
 
-// Live Data injection from Yajur Fibres Limited Yarn Division
-export const RAW_LIVE_TASKS_DATA = [
-  { taskId: 1, taskCode: 'TM-001', name: 'B. Card- 1  Machine Maintaince', category: 'Carding Machines', date: '2026-09-15' },
-  { taskId: 2, taskCode: 'TM-002', name: 'B. Card- 2 Machine Maintaince', category: 'Carding Machines', date: '2026-09-16' },
-  { taskId: 3, taskCode: 'TM-003', name: 'F. Card- 1 Machine Maintaince', category: 'Carding Machines', date: '2026-09-17' },
-  { taskId: 4, taskCode: 'TM-004', name: 'F. Card- 2 Machine Maintaince', category: 'Carding Machines', date: '2026-09-18' },
-  { taskId: 5, taskCode: 'TM-005', name: 'F. Card- 3 Machine Maintaince', category: 'Carding Machines', date: '2026-09-19' },
-  { taskId: 6, taskCode: 'TM-006', name: 'Mono- 1 Machine Maintaince', category: 'Mono Machines', date: '2026-09-20' },
-  { taskId: 7, taskCode: 'TM-007', name: 'Mono- 2 Machine Maintaince', category: 'Mono Machines', date: '2026-09-21' },
-  { taskId: 8, taskCode: 'TM-008', name: 'Mono- 3 Machine Maintaince', category: 'Mono Machines', date: '2026-09-22' },
-  { taskId: 9, taskCode: 'TM-009', name: 'Punjab- 1 Machine Maintaince', category: 'Punjab Machines', date: '2026-09-23' },
-  { taskId: 10, taskCode: 'TM-010', name: 'Punjab- 2 Machine Maintaince', category: 'Punjab Machines', date: '2026-09-24' },
-  { taskId: 11, taskCode: 'TM-011', name: 'Fin- 2 Machine Maintaince', category: 'Finishing Machines', date: '2026-09-25' },
-  { taskId: 12, taskCode: 'TM-012', name: 'Fin- 3 Machine Maintaince', category: 'Finishing Machines', date: '2026-09-26' },
-  { taskId: 13, taskCode: 'TM-013', name: 'Spg- 1 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-27' },
-  { taskId: 14, taskCode: 'TM-014', name: 'Spg- 2 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-28' },
-  { taskId: 15, taskCode: 'TM-015', name: 'Spg- 3 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-29' },
-  { taskId: 16, taskCode: 'TM-016', name: 'Spg- 4 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-30' },
-  { taskId: 17, taskCode: 'TM-017', name: 'Spg- 5 Machine Maintaince', category: 'Spinning Machines', date: '2026-09-30' },
-  { taskId: 18, taskCode: 'TM-018', name: 'Polish m/c- 1 Machine Maintaince', category: 'Polish Machines', date: '2026-10-01' },
-  { taskId: 19, taskCode: 'TM-019', name: 'Polish m/c- 2 Machine Maintaince', category: 'Polish Machines', date: '2026-10-02' },
-  { taskId: 20, taskCode: 'TM-020', name: 'Polish m/c- 3 Machine Maintaince', category: 'Polish Machines', date: '2026-10-03' },
-  { taskId: 21, taskCode: 'TM-021', name: 'COMBER- 1 Machine Maintaince', category: 'Comber Machines', date: '2026-09-15' },
-  { taskId: 22, taskCode: 'TM-022', name: 'COMBER- 2 Machine Maintaince', category: 'Comber Machines', date: '2026-09-16' },
-  { taskId: 23, taskCode: 'TM-023', name: 'COMBER- 3 Machine Maintaince', category: 'Comber Machines', date: '2026-09-17' },
-  { taskId: 24, taskCode: 'TM-024', name: 'COMBER- 4 Machine Maintaince', category: 'Comber Machines', date: '2026-09-18' },
-  { taskId: 25, taskCode: 'TM-025', name: 'COMBER- 5 Machine Maintaince', category: 'Comber Machines', date: '2026-09-19' },
-  { taskId: 26, taskCode: 'TM-026', name: 'COMBER- 6 Machine Maintaince', category: 'Comber Machines', date: '2026-09-20' },
-  { taskId: 27, taskCode: 'TM-027', name: 'COMBER- 7 Machine Maintaince', category: 'Comber Machines', date: '2026-09-21' },
-  { taskId: 28, taskCode: 'TM-028', name: 'COMBER- 8 Machine Maintaince', category: 'Comber Machines', date: '2026-09-22' },
-  { taskId: 29, taskCode: 'TM-029', name: 'COMBER- 9 Machine Maintaince', category: 'Comber Machines', date: '2026-09-23' },
-  { taskId: 30, taskCode: 'TM-030', name: 'COMBER- 10 Machine Maintaince', category: 'Comber Machines', date: '2026-09-24' },
-  { taskId: 31, taskCode: 'TM-031', name: 'COMBER- 11 Machine Maintaince', category: 'Comber Machines', date: '2026-09-25' },
-  { taskId: 32, taskCode: 'TM-032', name: 'COMBER- 12 Machine Maintaince', category: 'Comber Machines', date: '2026-09-26' },
-  { taskId: 33, taskCode: 'TM-033', name: 'COMBER- 13 Machine Maintaince', category: 'Comber Machines', date: '2026-09-27' },
+// 33 Machines categorized into Group 1 (MC1: 17 machines) and Group 2 (MC2: 16 machines)
+export const RAW_LIVE_TASKS_DATA: Array<{
+  taskId: number;
+  taskCode: string;
+  name: string;
+  category: string;
+  rotationGroup: RotationGroup;
+  rotationPosition: number;
+}> = [
+  // MACHINE GROUP 1 – M/C 1 ROTATION (17 Machines)
+  { taskId: 1, taskCode: 'MC1-01', name: 'B. Card-1 Machine Maintenance', category: 'Carding Machines', rotationGroup: 'MC1', rotationPosition: 1 },
+  { taskId: 2, taskCode: 'MC1-02', name: 'B. Card-2 Machine Maintenance', category: 'Carding Machines', rotationGroup: 'MC1', rotationPosition: 2 },
+  { taskId: 3, taskCode: 'MC1-03', name: 'F. Card-1 Machine Maintenance', category: 'Carding Machines', rotationGroup: 'MC1', rotationPosition: 3 },
+  { taskId: 4, taskCode: 'MC1-04', name: 'F. Card-2 Machine Maintenance', category: 'Carding Machines', rotationGroup: 'MC1', rotationPosition: 4 },
+  { taskId: 5, taskCode: 'MC1-05', name: 'F. Card-3 Machine Maintenance', category: 'Carding Machines', rotationGroup: 'MC1', rotationPosition: 5 },
+  { taskId: 6, taskCode: 'MC1-06', name: 'Mono-1 Machine Maintenance', category: 'Mono Machines', rotationGroup: 'MC1', rotationPosition: 6 },
+  { taskId: 7, taskCode: 'MC1-07', name: 'Mono-2 Machine Maintenance', category: 'Mono Machines', rotationGroup: 'MC1', rotationPosition: 7 },
+  { taskId: 8, taskCode: 'MC1-08', name: 'Mono-3 Machine Maintenance', category: 'Mono Machines', rotationGroup: 'MC1', rotationPosition: 8 },
+  { taskId: 9, taskCode: 'MC1-09', name: 'Punjab-1 Machine Maintenance', category: 'Punjab Machines', rotationGroup: 'MC1', rotationPosition: 9 },
+  { taskId: 10, taskCode: 'MC1-10', name: 'Punjab-2 Machine Maintenance', category: 'Punjab Machines', rotationGroup: 'MC1', rotationPosition: 10 },
+  { taskId: 11, taskCode: 'MC1-11', name: 'Fin-2 Machine Maintenance', category: 'Finishing Machines', rotationGroup: 'MC1', rotationPosition: 11 },
+  { taskId: 12, taskCode: 'MC1-12', name: 'Fin-3 Machine Maintenance', category: 'Finishing Machines', rotationGroup: 'MC1', rotationPosition: 12 },
+  { taskId: 13, taskCode: 'MC1-13', name: 'Spg-1 Machine Maintenance', category: 'Spinning Machines', rotationGroup: 'MC1', rotationPosition: 13 },
+  { taskId: 14, taskCode: 'MC1-14', name: 'Spg-2 Machine Maintenance', category: 'Spinning Machines', rotationGroup: 'MC1', rotationPosition: 14 },
+  { taskId: 15, taskCode: 'MC1-15', name: 'Spg-3 Machine Maintenance', category: 'Spinning Machines', rotationGroup: 'MC1', rotationPosition: 15 },
+  { taskId: 16, taskCode: 'MC1-16', name: 'Spg-4 Machine Maintenance', category: 'Spinning Machines', rotationGroup: 'MC1', rotationPosition: 16 },
+  { taskId: 17, taskCode: 'MC1-17', name: 'Spg-5 Machine Maintenance', category: 'Spinning Machines', rotationGroup: 'MC1', rotationPosition: 17 },
+
+  // MACHINE GROUP 2 – M/C 2 ROTATION (16 Machines)
+  { taskId: 18, taskCode: 'MC2-01', name: 'COMBER-1 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 1 },
+  { taskId: 19, taskCode: 'MC2-02', name: 'COMBER-2 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 2 },
+  { taskId: 20, taskCode: 'MC2-03', name: 'COMBER-3 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 3 },
+  { taskId: 21, taskCode: 'MC2-04', name: 'COMBER-4 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 4 },
+  { taskId: 22, taskCode: 'MC2-05', name: 'COMBER-5 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 5 },
+  { taskId: 23, taskCode: 'MC2-06', name: 'COMBER-6 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 6 },
+  { taskId: 24, taskCode: 'MC2-07', name: 'COMBER-7 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 7 },
+  { taskId: 25, taskCode: 'MC2-08', name: 'COMBER-8 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 8 },
+  { taskId: 26, taskCode: 'MC2-09', name: 'COMBER-9 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 9 },
+  { taskId: 27, taskCode: 'MC2-10', name: 'COMBER-10 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 10 },
+  { taskId: 28, taskCode: 'MC2-11', name: 'COMBER-11 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 11 },
+  { taskId: 29, taskCode: 'MC2-12', name: 'COMBER-12 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 12 },
+  { taskId: 30, taskCode: 'MC2-13', name: 'COMBER-13 Machine Maintenance', category: 'Comber Machines', rotationGroup: 'MC2', rotationPosition: 13 },
+  { taskId: 31, taskCode: 'MC2-14', name: 'Polish m/c-1 Machine Maintenance', category: 'Polish Machines', rotationGroup: 'MC2', rotationPosition: 14 },
+  { taskId: 32, taskCode: 'MC2-15', name: 'Polish m/c-2 Machine Maintenance', category: 'Polish Machines', rotationGroup: 'MC2', rotationPosition: 15 },
+  { taskId: 33, taskCode: 'MC2-16', name: 'Polish m/c-3 Machine Maintenance', category: 'Polish Machines', rotationGroup: 'MC2', rotationPosition: 16 },
 ];
 
 export function generateInitialTaskMasters(): TaskMaster[] {
   return RAW_LIVE_TASKS_DATA.map((t) => ({
     id: `tm-${t.taskId}`,
+    taskId: t.taskId,
+    machineId: `M-${t.taskCode}`,
+    machineName: t.name,
     taskCode: t.taskCode,
     taskName: t.name,
-    taskDescription: `15-day scheduled preventive maintenance and mechanical inspection for ${t.name}.`,
+    taskDescription: `17-Day Dual Rotation preventive maintenance and safety check for ${t.name}.`,
     checklistTemplateId: 'chk-machine-maint',
     checklistName: 'Machine Maintenance Checklist',
     assignedUserId: 'user-doer-1',
@@ -167,64 +177,36 @@ export function generateInitialTaskMasters(): TaskMaster[] {
     assignedEmployeeId: 'YFL-084',
     departmentId: 'dept-yarn-1',
     departmentName: 'Yarn Division',
-    frequencyType: 'interval_days',
-    frequencyValue: 15,
-    startDate: t.date,
+    scheduleType: '17-Day Dual Rotation',
+    rotationGroup: t.rotationGroup,
+    rotationPosition: t.rotationPosition,
+    frequencyType: 'sequential_rotation',
+    frequencyValue: 2,
+    startDate: '2026-07-04',
     priority: 'medium',
     status: 'active',
     taskCategory: t.category,
     createdBy: 'YFL Administrator',
-    createdAt: '2026-09-01T08:00:00Z',
-    updatedAt: '2026-09-01T08:00:00Z',
+    createdAt: '2026-07-01T08:00:00Z',
+    updatedAt: '2026-07-01T08:00:00Z',
   }));
 }
 
-export function generateInitialScheduledTasks(taskMasters: TaskMaster[], advanceDays: number = 5): ScheduledTask[] {
-  const allSchedules: ScheduledTask[] = [];
-
-  taskMasters.forEach((tm) => {
-    const dates = generateScheduleDates(
-      {
-        startDate: tm.startDate,
-        frequencyType: tm.frequencyType,
-        frequencyValue: tm.frequencyValue,
-        weeklyDay: tm.weeklyDay,
-      },
-      { horizonMonths: 12 }
-    );
-
-    dates.forEach((dueDate, index) => {
-      const occurrenceNumber = index + 1;
-      const visDate = calculateVisibilityDate(dueDate, advanceDays);
-
-      allSchedules.push({
-        id: `sch-${tm.id}-${occurrenceNumber}-${dueDate}`,
-        scheduleId: `SCH-${tm.taskCode}-${occurrenceNumber.toString().padStart(3, '0')}`,
-        taskMasterId: tm.id,
-        taskCode: tm.taskCode,
-        taskName: tm.taskName,
-        checklistTemplateId: tm.checklistTemplateId,
-        checklistName: tm.checklistName,
-        assignedUserId: tm.assignedUserId,
-        assignedUserName: tm.assignedUserName,
-        assignedEmployeeId: tm.assignedEmployeeId,
-        departmentId: tm.departmentId,
-        departmentName: tm.departmentName,
-        frequencyType: tm.frequencyType,
-        frequencyValue: tm.frequencyValue,
-        frequencyDisplay: 'Every 15 Days',
-        originalStartDate: tm.startDate,
-        dueDate,
-        visibilityDate: visDate,
-        status: 'future',
-        priority: tm.priority,
-        generatedBy: 'system_init',
-        generatedDate: tm.createdAt,
-      });
-    });
+export function generateInitialScheduledTasks(
+  taskMasters: TaskMaster[],
+  holidays: Holiday[] = INITIAL_HOLIDAYS,
+  advanceDays: number = 5
+): ScheduledTask[] {
+  const result = generateYflDualRotationSchedule(taskMasters, {
+    startDate: '2026-07-04',
+    durationDays: 365,
+    holidays,
+    skipHolidays: true,
+    skipSundays: true,
+    advanceDays,
   });
 
-  return allSchedules;
+  return result.scheduledTasks;
 }
 
 export function generateInitialNotifications(): NotificationItem[] {
@@ -232,12 +214,12 @@ export function generateInitialNotifications(): NotificationItem[] {
     {
       id: 'notif-welcome',
       userId: 'user-admin-1',
-      title: '33 Live Task Masters Injected',
-      message: '33 Yarn Division machines and 1-year schedules (15-day recurrence) have been successfully activated for Swapan Kr Ghorai.',
+      title: 'Yarn Division Accurate 17-Day Rotation Schedule Active',
+      message: 'Dual Machine Groups (M/C 1: 17 machines, M/C 2: 16 machines) with Sunday skipping configured for Swapan Kr Ghorai from 04-07-2026.',
       type: 'info',
       isRead: false,
-      createdAt: '2026-09-07T08:00:00Z',
-    }
+      createdAt: '2026-07-04T08:00:00Z',
+    },
   ];
 }
 
@@ -249,199 +231,218 @@ export function generateInitialAuditLogs(): AuditLog[] {
       userId: 'user-admin-1',
       userName: 'YFL Administrator',
       role: 'admin',
-      recordType: 'TaskMaster',
-      recordId: 'YFL-YARN-33',
-      reason: 'Injected 33 live Yarn Division machine maintenance task masters with 1-year schedules.',
-      timestamp: '2026-09-07T08:00:00Z',
-    }
+      recordType: 'MasterSchedule',
+      recordId: 'YFL-ROTATION-2026',
+      reason: 'Initialized Yarn Division Accurate 17-Working-Day Rotation Schedule (M/C 1 + M/C 2, Sunday skipped).',
+      timestamp: '2026-07-04T08:00:00Z',
+    },
   ];
 }
 
-// Storage Manager
-class StorageManager {
-  private getItem<T>(key: string, defaultVal: T): T {
-    try {
-      const data = localStorage.getItem(STORAGE_PREFIX + key);
-      return data ? JSON.parse(data) : defaultVal;
-    } catch {
-      return defaultVal;
-    }
-  }
-
-  private setItem<T>(key: string, val: T): void {
-    try {
-      localStorage.setItem(STORAGE_PREFIX + key, JSON.stringify(val));
-    } catch (err) {
-      console.error('LocalStorage write error:', err);
-    }
-  }
-
-  init(): void {
-    // Live data injection v3: inject user's exact 33 machines
-    const liveDataV3 = localStorage.getItem(STORAGE_PREFIX + 'live_data_v3');
-    if (!liveDataV3) {
-      const initialMasters = generateInitialTaskMasters();
-      const initialSchedules = generateInitialScheduledTasks(initialMasters, 5);
-      this.setItem('taskMasters', initialMasters);
-      this.setItem('scheduledTasks', initialSchedules);
-      this.setItem('notifications', generateInitialNotifications());
-      this.setItem('auditLogs', generateInitialAuditLogs());
-      this.setItem('departments', [INITIAL_DEPARTMENT]);
-      this.setItem('users', INITIAL_USERS);
-      this.setItem('checklistTemplates', [INITIAL_CHECKLIST_TEMPLATE]);
-      this.setItem('settings', INITIAL_SETTINGS);
-      localStorage.setItem(STORAGE_PREFIX + 'live_data_v3', 'true');
-      return;
-    }
-
-    if (!localStorage.getItem(STORAGE_PREFIX + 'departments')) {
-      this.setItem('departments', [INITIAL_DEPARTMENT]);
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'users')) {
-      this.setItem('users', INITIAL_USERS);
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'checklistTemplates')) {
-      this.setItem('checklistTemplates', [INITIAL_CHECKLIST_TEMPLATE]);
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'settings')) {
-      this.setItem('settings', INITIAL_SETTINGS);
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'taskMasters')) {
-      const masters = generateInitialTaskMasters();
-      this.setItem('taskMasters', masters);
-      this.setItem('scheduledTasks', generateInitialScheduledTasks(masters, 5));
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'scheduledTasks')) {
-      const masters = this.getTaskMasters();
-      this.setItem('scheduledTasks', generateInitialScheduledTasks(masters, 5));
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'notifications')) {
-      this.setItem('notifications', generateInitialNotifications());
-    }
-    if (!localStorage.getItem(STORAGE_PREFIX + 'auditLogs')) {
-      this.setItem('auditLogs', generateInitialAuditLogs());
-    }
-  }
-
-  // Users
-  getUsers(): User[] {
-    return this.getItem<User[]>('users', INITIAL_USERS);
-  }
-  saveUsers(users: User[]): void {
-    this.setItem('users', users);
-  }
-
-  // Departments
-  getDepartments(): Department[] {
-    return this.getItem<Department[]>('departments', [INITIAL_DEPARTMENT]);
-  }
-  saveDepartments(depts: Department[]): void {
-    this.setItem('departments', depts);
-  }
-
-  // Checklist Templates
-  getChecklistTemplates(): ChecklistTemplate[] {
-    return this.getItem<ChecklistTemplate[]>('checklistTemplates', [INITIAL_CHECKLIST_TEMPLATE]);
-  }
-  saveChecklistTemplates(templates: ChecklistTemplate[]): void {
-    this.setItem('checklistTemplates', templates);
-  }
-
+export const storage = {
   // Task Masters
   getTaskMasters(): TaskMaster[] {
-    return this.getItem<TaskMaster[]>('taskMasters', []);
-  }
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}task_masters_v3`);
+    if (!raw) {
+      const initial = generateInitialTaskMasters();
+      this.saveTaskMasters(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return generateInitialTaskMasters();
+    }
+  },
+
   saveTaskMasters(tasks: TaskMaster[]): void {
-    this.setItem('taskMasters', tasks);
-  }
+    localStorage.setItem(`${STORAGE_PREFIX}task_masters_v3`, JSON.stringify(tasks));
+  },
 
   // Scheduled Tasks
   getScheduledTasks(): ScheduledTask[] {
-    return this.getItem<ScheduledTask[]>('scheduledTasks', []);
-  }
-  saveScheduledTasks(schedules: ScheduledTask[]): void {
-    this.setItem('scheduledTasks', schedules);
-  }
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}scheduled_tasks_v3`);
+    if (!raw) {
+      const masters = this.getTaskMasters();
+      const holidays = this.getHolidays();
+      const initial = generateInitialScheduledTasks(masters, holidays);
+      this.saveScheduledTasks(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      const masters = this.getTaskMasters();
+      const holidays = this.getHolidays();
+      const initial = generateInitialScheduledTasks(masters, holidays);
+      this.saveScheduledTasks(initial);
+      return initial;
+    }
+  },
 
-  // Settings
+  saveScheduledTasks(tasks: ScheduledTask[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}scheduled_tasks_v3`, JSON.stringify(tasks));
+  },
+
+  // Holidays
+  getHolidays(): Holiday[] {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}holidays_v1`);
+    if (!raw) {
+      this.saveHolidays(INITIAL_HOLIDAYS);
+      return INITIAL_HOLIDAYS;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return INITIAL_HOLIDAYS;
+    }
+  },
+
+  saveHolidays(holidays: Holiday[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}holidays_v1`, JSON.stringify(holidays));
+  },
+
+  // Departments
+  getDepartments(): Department[] {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}departments`);
+    if (!raw) {
+      const initial = [INITIAL_DEPARTMENT];
+      this.saveDepartments(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [INITIAL_DEPARTMENT];
+    }
+  },
+
+  saveDepartments(departments: Department[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}departments`, JSON.stringify(departments));
+  },
+
+  // Users
+  getUsers(): User[] {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}users_v2`);
+    if (!raw) {
+      this.saveUsers(INITIAL_USERS);
+      return INITIAL_USERS;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return INITIAL_USERS;
+    }
+  },
+
+  saveUsers(users: User[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}users_v2`, JSON.stringify(users));
+  },
+
+  // Checklist Templates
+  getChecklistTemplates(): ChecklistTemplate[] {
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}checklist_templates`);
+    if (!raw) {
+      const initial = [INITIAL_CHECKLIST_TEMPLATE];
+      this.saveChecklistTemplates(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [INITIAL_CHECKLIST_TEMPLATE];
+    }
+  },
+
+  saveChecklistTemplates(templates: ChecklistTemplate[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}checklist_templates`, JSON.stringify(templates));
+  },
+
+  // App Settings
   getSettings(): AppSettings {
-    return this.getItem<AppSettings>('settings', INITIAL_SETTINGS);
-  }
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}settings_v3`);
+    if (!raw) {
+      this.saveSettings(INITIAL_SETTINGS);
+      return INITIAL_SETTINGS;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return INITIAL_SETTINGS;
+    }
+  },
+
   saveSettings(settings: AppSettings): void {
-    this.setItem('settings', settings);
-  }
-
-  // Bulk Data Export/Import
-  loadAllData() {
-    return {
-      taskMasters: this.getTaskMasters(),
-      scheduledTasks: this.getScheduledTasks(),
-      departments: this.getDepartments(),
-      users: this.getUsers(),
-      checklistTemplates: this.getChecklistTemplates(),
-      settings: this.getSettings(),
-      auditLogs: this.getAuditLogs(),
-    };
-  }
-
-  saveAllData(data: {
-    taskMasters?: TaskMaster[];
-    scheduledTasks?: ScheduledTask[];
-    departments?: Department[];
-    users?: User[];
-    checklistTemplates?: ChecklistTemplate[];
-    settings?: AppSettings;
-    auditLogs?: AuditLog[];
-  }): void {
-    if (data.taskMasters) this.saveTaskMasters(data.taskMasters);
-    if (data.scheduledTasks) this.saveScheduledTasks(data.scheduledTasks);
-    if (data.departments) this.saveDepartments(data.departments);
-    if (data.users) this.saveUsers(data.users);
-    if (data.checklistTemplates) this.saveChecklistTemplates(data.checklistTemplates);
-    if (data.settings) this.saveSettings(data.settings);
-  }
+    localStorage.setItem(`${STORAGE_PREFIX}settings_v3`, JSON.stringify(settings));
+  },
 
   // Notifications
   getNotifications(): NotificationItem[] {
-    return this.getItem<NotificationItem[]>('notifications', []);
-  }
-  saveNotifications(notifs: NotificationItem[]): void {
-    this.setItem('notifications', notifs);
-  }
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}notifications`);
+    if (!raw) {
+      const initial = generateInitialNotifications();
+      this.saveNotifications(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveNotifications(notifications: NotificationItem[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}notifications`, JSON.stringify(notifications));
+  },
+
+  addNotification(notification: Omit<NotificationItem, 'id' | 'createdAt' | 'isRead'>): void {
+    const list = this.getNotifications();
+    const newItem: NotificationItem = {
+      ...notification,
+      id: `notif-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+      isRead: false,
+    };
+    list.unshift(newItem);
+    this.saveNotifications(list.slice(0, 50));
+  },
 
   // Audit Logs
   getAuditLogs(): AuditLog[] {
-    return this.getItem<AuditLog[]>('auditLogs', []);
-  }
-  addAuditLog(entry: Omit<AuditLog, 'id' | 'timestamp'>): void {
-    const logs = this.getAuditLogs();
+    const raw = localStorage.getItem(`${STORAGE_PREFIX}audit_logs`);
+    if (!raw) {
+      const initial = generateInitialAuditLogs();
+      this.saveAuditLogs(initial);
+      return initial;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return [];
+    }
+  },
+
+  saveAuditLogs(logs: AuditLog[]): void {
+    localStorage.setItem(`${STORAGE_PREFIX}audit_logs`, JSON.stringify(logs));
+  },
+
+  addAuditLog(log: Omit<AuditLog, 'id' | 'timestamp'>): void {
+    const list = this.getAuditLogs();
     const newLog: AuditLog = {
-      ...entry,
+      ...log,
       id: `audit-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
       timestamp: new Date().toISOString(),
     };
-    logs.unshift(newLog);
-    // Keep last 500 logs
-    this.setItem('auditLogs', logs.slice(0, 500));
-  }
+    list.unshift(newLog);
+    this.saveAuditLogs(list.slice(0, 500));
+  },
 
-  clearAllTaskData(): void {
-    this.saveTaskMasters([]);
-    this.saveScheduledTasks([]);
-    this.saveNotifications([]);
-    this.saveAuditLogs([]);
-  }
-
-  saveAuditLogs(logs: AuditLog[]): void {
-    this.setItem('auditLogs', logs);
-  }
-
-  resetToDefault(): void {
-    localStorage.clear();
-    this.init();
-  }
-}
-
-export const storage = new StorageManager();
-storage.init();
-export const storageService = storage;
+  clearAllData(): void {
+    const keys = Object.keys(localStorage);
+    keys.forEach((key) => {
+      if (key.startsWith(STORAGE_PREFIX)) {
+        localStorage.removeItem(key);
+      }
+    });
+  },
+};

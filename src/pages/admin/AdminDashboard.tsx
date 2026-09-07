@@ -36,10 +36,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // KPI calculations
   const totalMasters = taskMasters.length;
   const totalSchedules = scheduledTasks.length;
-  const dueTodayTasks = scheduledTasks.filter((s) => s.status === 'due_today');
-  const upcomingTasks = scheduledTasks.filter((s) => s.status === 'available' || s.status === 'future');
+  const dueTodayTasks = scheduledTasks.filter(
+    (s) => (s.status === 'due_today' || s.dueDate === todayStr) && !s.status.startsWith('completed')
+  );
+  const upcomingTasks = scheduledTasks.filter(
+    (s) => !s.status.startsWith('completed') && s.dueDate >= todayStr
+  );
   const completedTasks = scheduledTasks.filter((s) => s.status.startsWith('completed'));
-  const overdueTasks = scheduledTasks.filter((s) => s.status === 'overdue');
+  const overdueTasks = scheduledTasks.filter(
+    (s) => s.dueDate < todayStr && !s.status.startsWith('completed')
+  );
   const activeUsers = users.filter((u) => u.status === 'active');
 
   const completedWithScore = completedTasks.filter((s) => s.score !== undefined);

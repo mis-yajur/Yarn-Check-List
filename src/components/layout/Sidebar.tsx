@@ -47,8 +47,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
     ? scheduledTasks
     : scheduledTasks.filter((s) => s.assignedUserId === currentUser?.id);
 
-  const dueTodayCount = userTasks.filter((s) => s.status === 'due_today').length;
-  const overdueCount = userTasks.filter((s) => s.status === 'overdue').length;
+  const dueTodayCount = userTasks.filter(
+    (s) => (s.status === 'due_today' || s.dueDate === todayStr) && !s.status.startsWith('completed')
+  ).length;
+  const overdueCount = userTasks.filter(
+    (s) => s.dueDate < todayStr && !s.status.startsWith('completed')
+  ).length;
 
   const adminNav = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },

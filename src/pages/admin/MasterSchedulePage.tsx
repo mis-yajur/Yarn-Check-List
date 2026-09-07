@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   AlertTriangle,
+  Award,
   Calendar,
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Download,
   Edit,
@@ -11,9 +14,11 @@ import {
   Filter,
   LayoutGrid,
   List,
+  ListTodo,
   Search,
   X,
 } from 'lucide-react';
+import { addDays, format, parseISO } from 'date-fns';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
 import { ScheduledTask, ScheduleStatus } from '../../types';
@@ -39,9 +44,14 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   const [monthFilter, setMonthFilter] = useState('all');
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<ScheduledTask | null>(null);
 
+  // Pagination state: Page-wise entries (100 or 250)
+  const [itemsPerPage, setItemsPerPage] = useState<number>(100);
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
   // Sync if initialFilter prop changes
   React.useEffect(() => {
     setStatusFilter(initialFilter);
+    setCurrentPage(1);
   }, [initialFilter]);
 
   // Admin correction modal state
@@ -51,39 +61,115 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   const [correctionScore, setCorrectionScore] = useState<number>(100);
 
   // Filter tasks: if doer, restricted to their own tasks unless admin
-  const baseTasks = isAdmin
-    ? scheduledTasks
-    : scheduledTasks.filter((s) => s.assignedUserId === currentUser?.id);
+  const baseTasks = useMemo(() => {
+    return isAdmin
+      ? scheduledTasks
+      : scheduledTasks.filter((s) => s.assignedUserId === currentUser?.id);
+  }, [isAdmin, scheduledTasks, currentUser?.id]);
 
-  const filteredTasks = baseTasks.filter((task) => {
-    const matchesSearch =
-      task.taskCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.taskName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.assignedUserName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      task.checklistName.toLowerCase().includes(searchQuery.toLowerCase());
-
-    let matchesStatus = true;
-    if (statusFilter === 'all') {
-      matchesStatus = true;
-    } else if (statusFilter === 'due_today') {
-      matchesStatus = task.status === 'due_today' || task.dueDate === todayStr;
-    } else if (statusFilter === 'upcoming') {
-      matchesStatus =
-        (task.status === 'available' || task.status === 'future' || task.status === 'due_today') &&
-        task.dueDate >= todayStr;
-    } else if (statusFilter === 'overdue') {
-      matchesStatus = task.status === 'overdue' || (task.dueDate < todayStr && !task.status.startsWith('completed'));
-    } else if (statusFilter === 'done' || statusFilter === 'completed') {
-      matchesStatus = task.status.startsWith('completed');
-    } else {
-      matchesStatus = task.status === statusFilter;
+  // Compute Today + 5 days date string for the upcoming filter (Today through Today+5 days)
+  const todayPlus5Str = useMemo(() => {
+    try {
+      const parsedToday = parseISO(todayStr);
+      return format(addDays(parsedToday, 5), 'yyyy-MM-dd');
+    } catch {
+      return todayStr;
     }
+  }, [todayStr]);
 
-    const matchesDoer = doerFilter === 'all' || task.assignedUserId === doerFilter;
-    const matchesMonth = monthFilter === 'all' || task.dueDate.startsWith(monthFilter);
+  // Summary Metrics calculated from the entire dataset (Total Tasks, Due Today, Upcoming 5 Days, Overdue, Completed)
+  const metrics = useMemo(() => {
+    const totalCount = baseTasks.length;
+    const dueTodayCount = baseTasks.filter(
+      (t) => (t.status === 'due_today' || t.dueDate === todayStr) && !t.status.startsWith('completed')
+    ).length;
+    const upcoming5DaysCount = baseTasks.filter(
+      (t) => !t.status.startsWith('completed') && t.dueDate >= todayStr && t.dueDate <= todayPlus5Str
+    ).length;
+    const overdueCount = baseTasks.filter(
+      (t) => t.dueDate < todayStr && !t.status.startsWith('completed')
+    ).length;
+    const completedCount = baseTasks.filter((t) => t.status.startsWith('completed')).length;
 
-    return matchesSearch && matchesStatus && matchesDoer && matchesMonth;
-  });
+    return {
+      totalCount,
+      dueTodayCount,
+      upcoming5DaysCount,
+      overdueCount,
+      completedCount,
+    };
+  }, [baseTasks, todayStr, todayPlus5Str]);
+
+  // Filter and sort tasks by due date
+  const filteredTasks = useMemo(() => {
+    const result = baseTasks.filter((task) => {
+      const matchesSearch =
+        task.taskCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        task.taskName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        task.assignedUserName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        task.checklistName.toLowerCase().includes(searchQuery.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      let matchesStatus = true;
+      if (statusFilter === 'all') {
+        matchesStatus = true;
+      } else if (statusFilter === 'due_today') {
+        // Due today strictly
+        matchesStatus = (task.status === 'due_today' || task.dueDate === todayStr) && !task.status.startsWith('completed');
+      } else if (statusFilter === 'upcoming') {
+        // Today + upcoming 5 days task only (non-completed)
+        matchesStatus =
+          !task.status.startsWith('completed') &&
+          task.dueDate >= todayStr &&
+          task.dueDate <= todayPlus5Str;
+      } else if (statusFilter === 'overdue') {
+        // Only if task due date is crossed (past today) and not completed
+        matchesStatus = task.dueDate < todayStr && !task.status.startsWith('completed');
+      } else if (statusFilter === 'available') {
+        // Next 5 days
+        matchesStatus =
+          !task.status.startsWith('completed') &&
+          task.dueDate >= todayStr &&
+          task.dueDate <= todayPlus5Str;
+      } else if (statusFilter === 'done' || statusFilter === 'completed') {
+        matchesStatus = task.status.startsWith('completed');
+      } else if (statusFilter === 'future') {
+        matchesStatus = !task.status.startsWith('completed') && task.dueDate > todayPlus5Str;
+      } else {
+        matchesStatus = task.status === statusFilter;
+      }
+
+      const matchesDoer = doerFilter === 'all' || task.assignedUserId === doerFilter;
+      const matchesMonth = monthFilter === 'all' || task.dueDate.startsWith(monthFilter);
+
+      return matchesStatus && matchesDoer && matchesMonth;
+    });
+
+    // Chronological sort by due date ascending, then schedule ID
+    return result.sort((a, b) => {
+      const cmp = a.dueDate.localeCompare(b.dueDate);
+      if (cmp !== 0) return cmp;
+      return a.scheduleId.localeCompare(b.scheduleId);
+    });
+  }, [baseTasks, searchQuery, statusFilter, doerFilter, monthFilter, todayStr, todayPlus5Str]);
+
+  // Reset to page 1 whenever filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, statusFilter, doerFilter, monthFilter, itemsPerPage]);
+
+  // Pagination calculation
+  const totalPages = Math.max(1, Math.ceil(filteredTasks.length / itemsPerPage));
+  const validCurrentPage = Math.min(Math.max(1, currentPage), totalPages);
+
+  const paginatedTasks = useMemo(() => {
+    const startIndex = (validCurrentPage - 1) * itemsPerPage;
+    return filteredTasks.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredTasks, validCurrentPage, itemsPerPage]);
+
+  const startIndex = (validCurrentPage - 1) * itemsPerPage;
+  const endIndex = Math.min(startIndex + itemsPerPage, filteredTasks.length);
 
   const getStatusBadge = (status: ScheduleStatus) => {
     switch (status) {
@@ -96,7 +182,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
       case 'due_today':
         return <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-[10px] font-bold text-blue-800 border border-blue-300 animate-pulse">Due Today</span>;
       case 'available':
-        return <span className="rounded-full bg-cyan-100 px-2.5 py-0.5 text-[10px] font-bold text-cyan-800 border border-cyan-300">Available (Next 5D)</span>;
+        return <span className="rounded-full bg-cyan-100 px-2.5 py-0.5 text-[10px] font-bold text-cyan-800 border border-cyan-300">Upcoming (5D)</span>;
       case 'overdue':
         return <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-bold text-red-800 border border-red-300">Overdue</span>;
       case 'cancelled':
@@ -175,7 +261,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Page Header */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div>
@@ -212,7 +298,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
 
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs"
+            className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 shadow-2xs cursor-pointer"
           >
             <Download className="h-4 w-4 text-slate-600" />
             Export CSV
@@ -220,14 +306,127 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
         </div>
       </div>
 
-      {/* Filter Bar */}
-      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs sm:grid-cols-2 lg:grid-cols-4">
+      {/* Summary KPI Cards with Total Task Calculations */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <div
+          onClick={() => setStatusFilter('all')}
+          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
+            statusFilter === 'all'
+              ? 'border-slate-800 bg-slate-900 text-white ring-2 ring-slate-800'
+              : 'border-slate-200 bg-white hover:border-slate-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold ${statusFilter === 'all' ? 'text-slate-200' : 'text-slate-700'}`}>
+              Total Tasks
+            </span>
+            <ListTodo className={`h-4 w-4 ${statusFilter === 'all' ? 'text-slate-300' : 'text-slate-600'}`} />
+          </div>
+          <p className={`mt-2 text-2xl font-black ${statusFilter === 'all' ? 'text-white' : 'text-slate-900'}`}>
+            {metrics.totalCount}
+          </p>
+          <span className={`text-[10px] ${statusFilter === 'all' ? 'text-slate-300' : 'text-slate-600'}`}>
+            All 1-Year Entries
+          </span>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('due_today')}
+          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
+            statusFilter === 'due_today'
+              ? 'border-blue-600 bg-blue-600 text-white ring-2 ring-blue-500'
+              : 'border-amber-200 bg-amber-50/60 hover:border-amber-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-900'}`}>
+              Due Today
+            </span>
+            <Clock className={`h-4 w-4 ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-800'}`} />
+          </div>
+          <p className={`mt-2 text-2xl font-black ${statusFilter === 'due_today' ? 'text-white' : 'text-amber-900'}`}>
+            {metrics.dueTodayCount}
+          </p>
+          <span className={`text-[10px] font-semibold ${statusFilter === 'due_today' ? 'text-blue-100' : 'text-amber-800'}`}>
+            {todayStr}
+          </span>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('upcoming')}
+          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
+            statusFilter === 'upcoming'
+              ? 'border-cyan-700 bg-cyan-700 text-white ring-2 ring-cyan-600'
+              : 'border-cyan-200 bg-cyan-50/50 hover:border-cyan-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-900'}`}>
+              Upcoming (Today + 5D)
+            </span>
+            <Calendar className={`h-4 w-4 ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-700'}`} />
+          </div>
+          <p className={`mt-2 text-2xl font-black ${statusFilter === 'upcoming' ? 'text-white' : 'text-cyan-900'}`}>
+            {metrics.upcoming5DaysCount}
+          </p>
+          <span className={`text-[10px] ${statusFilter === 'upcoming' ? 'text-cyan-100' : 'text-cyan-800'}`}>
+            Next 5 Days Horizon
+          </span>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('overdue')}
+          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
+            statusFilter === 'overdue'
+              ? 'border-red-600 bg-red-600 text-white ring-2 ring-red-500'
+              : 'border-red-200 bg-red-50/60 hover:border-red-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-900'}`}>
+              Overdue Tasks
+            </span>
+            <AlertTriangle className={`h-4 w-4 ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-800'}`} />
+          </div>
+          <p className={`mt-2 text-2xl font-black ${statusFilter === 'overdue' ? 'text-white' : 'text-red-900'}`}>
+            {metrics.overdueCount}
+          </p>
+          <span className={`text-[10px] font-semibold ${statusFilter === 'overdue' ? 'text-red-100' : 'text-red-900'}`}>
+            Due Date Crossed
+          </span>
+        </div>
+
+        <div
+          onClick={() => setStatusFilter('done')}
+          className={`cursor-pointer rounded-xl border p-3.5 shadow-2xs transition-all ${
+            statusFilter === 'done' || statusFilter === 'completed'
+              ? 'border-emerald-700 bg-emerald-700 text-white ring-2 ring-emerald-600'
+              : 'border-emerald-200 bg-emerald-50/50 hover:border-emerald-400'
+          }`}
+        >
+          <div className="flex items-center justify-between">
+            <span className={`text-[11px] font-bold ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-900'}`}>
+              Done / Completed
+            </span>
+            <CheckCircle className={`h-4 w-4 ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-700'}`} />
+          </div>
+          <p className={`mt-2 text-2xl font-black ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-white' : 'text-emerald-900'}`}>
+            {metrics.completedCount}
+          </p>
+          <span className={`text-[10px] font-semibold ${statusFilter === 'done' || statusFilter === 'completed' ? 'text-emerald-100' : 'text-emerald-800'}`}>
+            Verified History
+          </span>
+        </div>
+      </div>
+
+      {/* Filter and Page Size Controls */}
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs sm:grid-cols-2 lg:grid-cols-5">
         {/* Search */}
-        <div className="relative">
+        <div className="relative lg:col-span-2">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Search Machine, Code, Doer..."
+            placeholder="Search Machine, Code, Doer, Checklist..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full rounded-lg border border-slate-300 pl-9 pr-3 py-2 text-xs text-slate-800 focus:border-emerald-500 focus:outline-hidden"
@@ -241,21 +440,18 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
             onChange={(e) => setStatusFilter(e.target.value)}
             className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
           >
-            <option value="all">All Statuses</option>
-            <option value="due_today">Due Today</option>
-            <option value="upcoming">Upcoming &amp; Next Due</option>
-            <option value="available">Available (Next 5 Days)</option>
-            <option value="overdue">Overdue</option>
-            <option value="completed_on_time">Completed On Time</option>
-            <option value="completed_early">Completed Early</option>
-            <option value="completed_late">Completed Late</option>
+            <option value="all">All Statuses ({metrics.totalCount})</option>
+            <option value="due_today">Due Today ({metrics.dueTodayCount})</option>
+            <option value="upcoming">Upcoming (Today + 5 Days) ({metrics.upcoming5DaysCount})</option>
+            <option value="overdue">Overdue (Due Crossed) ({metrics.overdueCount})</option>
+            <option value="done">Done / Completed ({metrics.completedCount})</option>
             <option value="future">Future Scheduled</option>
             <option value="cancelled">Cancelled</option>
           </select>
         </div>
 
-        {/* Doer Filter (Admin only) */}
-        {isAdmin && (
+        {/* Doer Filter (Admin only) or Month */}
+        {isAdmin ? (
           <div>
             <select
               value={doerFilter}
@@ -272,29 +468,41 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
                 ))}
             </select>
           </div>
+        ) : (
+          <div>
+            <select
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
+            >
+              <option value="all">All Months (1-Year)</option>
+              <option value="2026-09">September 2026</option>
+              <option value="2026-10">October 2026</option>
+              <option value="2026-11">November 2026</option>
+              <option value="2026-12">December 2026</option>
+              <option value="2027-01">January 2027</option>
+              <option value="2027-02">February 2027</option>
+              <option value="2027-03">March 2027</option>
+              <option value="2027-04">April 2027</option>
+              <option value="2027-05">May 2027</option>
+              <option value="2027-06">June 2027</option>
+              <option value="2027-07">July 2027</option>
+              <option value="2027-08">August 2027</option>
+              <option value="2027-09">September 2027</option>
+            </select>
+          </div>
         )}
 
-        {/* Month Filter */}
+        {/* Page Wise Entries Selector (100 Entries or 250 Entries) */}
         <div>
           <select
-            value={monthFilter}
-            onChange={(e) => setMonthFilter(e.target.value)}
-            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs text-slate-700 focus:border-emerald-500 focus:outline-hidden"
+            value={itemsPerPage}
+            onChange={(e) => setItemsPerPage(Number(e.target.value))}
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-800 focus:border-emerald-500 focus:outline-hidden bg-slate-50"
           >
-            <option value="all">All Months (1-Year)</option>
-            <option value="2026-09">September 2026</option>
-            <option value="2026-10">October 2026</option>
-            <option value="2026-11">November 2026</option>
-            <option value="2026-12">December 2026</option>
-            <option value="2027-01">January 2027</option>
-            <option value="2027-02">February 2027</option>
-            <option value="2027-03">March 2027</option>
-            <option value="2027-04">April 2027</option>
-            <option value="2027-05">May 2027</option>
-            <option value="2027-06">June 2027</option>
-            <option value="2027-07">July 2027</option>
-            <option value="2027-08">August 2027</option>
-            <option value="2027-09">September 2027</option>
+            <option value={100}>100 Entries / Page</option>
+            <option value={250}>250 Entries / Page</option>
+            <option value={50}>50 Entries / Page</option>
           </select>
         </div>
       </div>
@@ -302,15 +510,52 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
       {/* Table View */}
       {viewMode === 'table' ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xs">
+          {/* Table Top Status / Pagination Header */}
+          <div className="flex flex-col sm:flex-row items-center justify-between border-b border-slate-200 bg-slate-50/80 px-4 py-3 gap-2">
+            <div className="text-xs text-slate-700">
+              Showing <strong className="text-slate-900">{filteredTasks.length === 0 ? 0 : startIndex + 1}</strong> to{' '}
+              <strong className="text-slate-900">{endIndex}</strong> of{' '}
+              <strong className="text-slate-900">{filteredTasks.length}</strong> matching entries{' '}
+              <span className="text-slate-700">(Total Scheduled Tasks in Database: {metrics.totalCount})</span>
+            </div>
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-600 font-medium">
+                  Page {validCurrentPage} of {totalPages}
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={validCurrentPage === 1}
+                    className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                    Prev
+                  </button>
+                  <button
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={validCurrentPage === totalPages}
+                    className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                  >
+                    Next
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs text-slate-700">
-              <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+              <thead className="border-b border-slate-200 bg-slate-100/90 text-[11px] font-bold text-slate-700 uppercase tracking-wider">
                 <tr>
                   <th className="p-3">Schedule ID</th>
                   <th className="p-3">Task / Machine</th>
                   <th className="p-3">Checklist</th>
                   <th className="p-3">Doer</th>
-                  <th className="p-3">Due Date</th>
+                  <th className="p-3">Due Date (Sorted)</th>
                   <th className="p-3">Status</th>
                   <th className="p-3">Completed At</th>
                   <th className="p-3">Delay</th>
@@ -319,88 +564,174 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredTasks.length === 0 ? (
+                {paginatedTasks.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="py-8 text-center text-slate-700">
-                      No schedule records found matching your filters.
+                    <td colSpan={10} className="py-12 text-center text-slate-700">
+                      <ListTodo className="mx-auto h-8 w-8 text-slate-400 mb-2" />
+                      <p className="font-semibold text-slate-800">No schedule records found</p>
+                      <p className="text-xs text-slate-600 mt-0.5">Adjust your search or status filters to view records.</p>
                     </td>
                   </tr>
                 ) : (
-                  filteredTasks.slice(0, 50).map((task) => (
-                    <tr key={task.id} className="hover:bg-slate-50/70 transition-colors">
-                      <td className="p-3 font-mono text-[11px] text-slate-700">{task.scheduleId}</td>
-                      <td className="p-3 font-bold text-slate-900">
-                        {task.taskName}
-                        <span className="block font-mono text-[10px] font-normal text-slate-700">{task.taskCode}</span>
-                      </td>
-                      <td className="p-3 text-slate-700">{task.checklistName}</td>
-                      <td className="p-3">
-                        <span className="font-semibold text-slate-900">{task.assignedUserName}</span>
-                        <span className="block text-[10px] text-slate-700">{task.assignedEmployeeId}</span>
-                      </td>
-                      <td className="p-3 font-mono font-semibold text-slate-900">{task.dueDate}</td>
-                      <td className="p-3">{getStatusBadge(task.status)}</td>
-                      <td className="p-3 text-slate-700">
-                        {task.completedDate ? (
-                          <>
-                            <span className="font-mono">{task.completedDate}</span>
-                            <span className="block text-[10px] text-slate-700">{task.completedTime}</span>
-                          </>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {task.delayDays !== undefined ? (
-                          <span className={task.delayDays > 0 ? 'font-bold text-amber-800' : 'text-emerald-800'}>
-                            {task.delayDays === 0 ? '0d (On Time)' : `+${task.delayDays}d late`}
-                          </span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="p-3">
-                        {task.score !== undefined ? (
-                          <span className="font-extrabold text-slate-900">{task.score} pts</span>
-                        ) : (
-                          <span className="text-slate-600">—</span>
-                        )}
-                      </td>
-                      <td className="p-3 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <button
-                            onClick={() => setSelectedTaskDetails(task)}
-                            title="View Full Task Record"
-                            className="rounded p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                  paginatedTasks.map((task) => {
+                    const isTaskDueToday = (task.status === 'due_today' || task.dueDate === todayStr) && !task.status.startsWith('completed');
+                    const isTaskOverdue = task.dueDate < todayStr && !task.status.startsWith('completed');
+
+                    return (
+                      <tr
+                        key={task.id}
+                        className={`transition-colors ${
+                          isTaskOverdue
+                            ? 'bg-red-50/30 hover:bg-red-50/60'
+                            : isTaskDueToday
+                            ? 'bg-blue-50/30 hover:bg-blue-50/60'
+                            : 'hover:bg-slate-50/70'
+                        }`}
+                      >
+                        <td className="p-3 font-mono text-[11px] font-medium text-slate-700">{task.scheduleId}</td>
+                        <td className="p-3 font-bold text-slate-900">
+                          {task.taskName}
+                          <span className="block font-mono text-[10px] font-normal text-slate-700">{task.taskCode}</span>
+                        </td>
+                        <td className="p-3 text-slate-700">{task.checklistName}</td>
+                        <td className="p-3">
+                          <span className="font-semibold text-slate-900">{task.assignedUserName}</span>
+                          <span className="block text-[10px] text-slate-700">{task.assignedEmployeeId}</span>
+                        </td>
+                        <td className="p-3 font-mono font-bold text-slate-900">
+                          <span
+                            className={
+                              isTaskOverdue
+                                ? 'text-red-700'
+                                : isTaskDueToday
+                                ? 'text-blue-700'
+                                : 'text-slate-900'
+                            }
                           >
-                            <Eye className="h-4 w-4" />
-                          </button>
-                          {isAdmin && task.completedAt && (
-                            <button
-                              onClick={() => handleOpenCorrection(task)}
-                              title="Admin Correction"
-                              className="rounded p-1.5 text-blue-700 hover:bg-blue-50 hover:text-blue-900"
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
+                            {task.dueDate}
+                          </span>
+                        </td>
+                        <td className="p-3">{getStatusBadge(task.status)}</td>
+                        <td className="p-3 text-slate-700">
+                          {task.completedDate ? (
+                            <>
+                              <span className="font-mono text-emerald-800 font-semibold">{task.completedDate}</span>
+                              <span className="block text-[10px] text-slate-700">{task.completedTime}</span>
+                            </>
+                          ) : (
+                            <span className="text-slate-600">—</span>
                           )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="p-3">
+                          {task.delayDays !== undefined ? (
+                            <span className={task.delayDays > 0 ? 'font-bold text-amber-800' : 'text-emerald-800'}>
+                              {task.delayDays === 0 ? '0d (On Time)' : `+${task.delayDays}d late`}
+                            </span>
+                          ) : isTaskOverdue ? (
+                            <span className="font-bold text-red-700">Overdue</span>
+                          ) : (
+                            <span className="text-slate-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-3">
+                          {task.score !== undefined ? (
+                            <span className="font-extrabold text-slate-900">{task.score} pts</span>
+                          ) : (
+                            <span className="text-slate-600">—</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            <button
+                              onClick={() => setSelectedTaskDetails(task)}
+                              title="View Full Task Record"
+                              className="rounded p-1.5 text-slate-600 hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
+                            >
+                              <Eye className="h-4 w-4" />
+                            </button>
+                            {isAdmin && task.completedAt && (
+                              <button
+                                onClick={() => handleOpenCorrection(task)}
+                                title="Admin Correction"
+                                className="rounded p-1.5 text-blue-700 hover:bg-blue-50 hover:text-blue-900 cursor-pointer"
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
           </div>
 
-          {filteredTasks.length > 50 && (
-            <div className="border-t border-slate-100 bg-slate-50 px-4 py-2 text-center text-xs text-slate-700">
-              Showing top 50 occurrences of {filteredTasks.length} total. Use search or filter for specific dates.
+          {/* Table Bottom Pagination Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between border-t border-slate-200 bg-slate-50/80 px-4 py-3 gap-3">
+            <div className="flex items-center gap-3 text-xs text-slate-700">
+              <span>
+                Showing page <strong>{validCurrentPage}</strong> of <strong>{totalPages}</strong> (
+                {filteredTasks.length === 0 ? 0 : startIndex + 1}–{endIndex} of {filteredTasks.length} filtered)
+              </span>
+              <span className="hidden sm:inline text-slate-300">|</span>
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-600">Rows per page:</span>
+                <select
+                  value={itemsPerPage}
+                  onChange={(e) => setItemsPerPage(Number(e.target.value))}
+                  className="rounded border border-slate-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                >
+                  <option value={100}>100</option>
+                  <option value={250}>250</option>
+                  <option value={50}>50</option>
+                </select>
+              </div>
             </div>
-          )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={() => setCurrentPage(1)}
+                  disabled={validCurrentPage === 1}
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  First
+                </button>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={validCurrentPage === 1}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                  Prev
+                </button>
+                <span className="px-2 text-xs font-bold text-slate-800">
+                  {validCurrentPage} / {totalPages}
+                </span>
+                <button
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={validCurrentPage === totalPages}
+                  className="flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  Next
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  onClick={() => setCurrentPage(totalPages)}
+                  disabled={validCurrentPage === totalPages}
+                  className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed shadow-2xs"
+                >
+                  Last
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       ) : (
-        /* Calendar View (Section 61) */
+        /* Calendar View */
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
           <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
             <h2 className="text-sm font-bold text-slate-900">
@@ -501,7 +832,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
                   {selectedTaskDetails.scheduleId}
                 </p>
               </div>
-              <button onClick={() => setSelectedTaskDetails(null)} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setSelectedTaskDetails(null)} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X className="h-5 w-5" />
               </button>
             </div>
@@ -565,7 +896,7 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
             <div className="mt-5 flex justify-end">
               <button
                 onClick={() => setSelectedTaskDetails(null)}
-                className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-700"
+                className="rounded-lg bg-slate-800 px-4 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 cursor-pointer"
               >
                 Close
               </button>
@@ -635,13 +966,13 @@ export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
                 <button
                   type="button"
                   onClick={() => setCorrectionModalTask(null)}
-                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-800"
+                  className="rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 cursor-pointer"
                 >
                   Apply Correction
                 </button>

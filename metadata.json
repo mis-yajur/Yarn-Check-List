@@ -1,0 +1,6 @@
+{
+  "name": "YFL TaskMS - Yarn Division Checklist & Task Management System",
+  "description": "Checklist, preventive maintenance, and automatic scheduling system for Yajur Fibres Limited Yarn Division.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

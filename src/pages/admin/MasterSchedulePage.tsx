@@ -18,16 +18,31 @@ import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
 import { ScheduledTask, ScheduleStatus } from '../../types';
 
-export const MasterSchedulePage: React.FC = () => {
+interface MasterSchedulePageProps {
+  initialFilter?: string;
+  title?: string;
+  subtitle?: string;
+}
+
+export const MasterSchedulePage: React.FC<MasterSchedulePageProps> = ({
+  initialFilter = 'all',
+  title,
+  subtitle,
+}) => {
   const { currentUser, isAdmin } = useAuth();
   const { scheduledTasks, departments, users, adminCorrectCompletion, todayStr } = useTasks();
 
   const [viewMode, setViewMode] = useState<'table' | 'calendar'>('table');
   const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialFilter);
   const [doerFilter, setDoerFilter] = useState('all');
   const [monthFilter, setMonthFilter] = useState('all');
   const [selectedTaskDetails, setSelectedTaskDetails] = useState<ScheduledTask | null>(null);
+
+  // Sync if initialFilter prop changes
+  React.useEffect(() => {
+    setStatusFilter(initialFilter);
+  }, [initialFilter]);
 
   // Admin correction modal state
   const [correctionModalTask, setCorrectionModalTask] = useState<ScheduledTask | null>(null);
@@ -47,7 +62,23 @@ export const MasterSchedulePage: React.FC = () => {
       task.assignedUserName.toLowerCase().includes(searchQuery.toLowerCase()) ||
       task.checklistName.toLowerCase().includes(searchQuery.toLowerCase());
 
-    const matchesStatus = statusFilter === 'all' || task.status === statusFilter;
+    let matchesStatus = true;
+    if (statusFilter === 'all') {
+      matchesStatus = true;
+    } else if (statusFilter === 'due_today') {
+      matchesStatus = task.status === 'due_today' || task.dueDate === todayStr;
+    } else if (statusFilter === 'upcoming') {
+      matchesStatus =
+        (task.status === 'available' || task.status === 'future' || task.status === 'due_today') &&
+        task.dueDate >= todayStr;
+    } else if (statusFilter === 'overdue') {
+      matchesStatus = task.status === 'overdue' || (task.dueDate < todayStr && !task.status.startsWith('completed'));
+    } else if (statusFilter === 'done' || statusFilter === 'completed') {
+      matchesStatus = task.status.startsWith('completed');
+    } else {
+      matchesStatus = task.status === statusFilter;
+    }
+
     const matchesDoer = doerFilter === 'all' || task.assignedUserId === doerFilter;
     const matchesMonth = monthFilter === 'all' || task.dueDate.startsWith(monthFilter);
 
@@ -149,10 +180,10 @@ export const MasterSchedulePage: React.FC = () => {
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5 shadow-xs sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-slate-900 sm:text-2xl">
-            {isAdmin ? 'Master Schedule Registry' : 'My Schedule View'}
+            {title || (isAdmin ? 'Master Schedule Registry' : 'My Schedule View')}
           </h1>
           <p className="text-xs text-slate-700 mt-0.5">
-            Full one-year preventive maintenance schedule with real-time status classifications.
+            {subtitle || 'Full one-year preventive maintenance schedule with real-time status classifications.'}
           </p>
         </div>
 
@@ -212,6 +243,7 @@ export const MasterSchedulePage: React.FC = () => {
           >
             <option value="all">All Statuses</option>
             <option value="due_today">Due Today</option>
+            <option value="upcoming">Upcoming &amp; Next Due</option>
             <option value="available">Available (Next 5 Days)</option>
             <option value="overdue">Overdue</option>
             <option value="completed_on_time">Completed On Time</option>

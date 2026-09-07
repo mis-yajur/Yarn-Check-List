@@ -121,28 +121,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setTodayStrState(newDate);
   };
 
-  const loadAll = () => {
-    setTaskMasters(storage.getTaskMasters());
-    setScheduledTasks(storage.getScheduledTasks());
-    setDepartments(storage.getDepartments());
-    setUsers(storage.getUsers());
-    setChecklistTemplates(storage.getChecklistTemplates());
-    setSettings(storage.getSettings());
-    setNotifications(storage.getNotifications());
-    setAuditLogs(storage.getAuditLogs());
-  };
-
-  const clearAllData = () => {
-    storage.clearAllTaskData();
-    loadAll();
-  };
-
-  useEffect(() => {
-    loadAll();
-  }, []);
-
-  // Update task statuses dynamically based on today's date if still open
-  const updateDynamicStatuses = (tasks: ScheduledTask[], advanceDays: number): ScheduledTask[] => {
+  const updateDynamicStatuses = (tasks: ScheduledTask[], advanceDays: number, currentToday: string): ScheduledTask[] => {
     return tasks.map((task) => {
       // If already completed or cancelled/suspended, keep as is
       if (
@@ -158,17 +137,49 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const dueDate = task.dueDate;
       const visDate = task.visibilityDate || calculateVisibilityDate(dueDate, advanceDays);
 
-      if (dueDate < todayStr) {
+      if (dueDate < currentToday) {
         return { ...task, status: 'overdue' };
-      } else if (dueDate === todayStr) {
+      } else if (dueDate === currentToday) {
         return { ...task, status: 'due_today' };
-      } else if (visDate <= todayStr) {
+      } else if (visDate <= currentToday) {
         return { ...task, status: 'available' };
       } else {
         return { ...task, status: 'future' };
       }
     });
   };
+
+  const loadAll = () => {
+    const rawMasters = storage.getTaskMasters();
+    const rawSchedules = storage.getScheduledTasks();
+    const currentSettings = storage.getSettings();
+    const updatedSchedules = updateDynamicStatuses(rawSchedules, currentSettings.taskAdvanceVisibilityDays || 5, todayStr);
+
+    setTaskMasters(rawMasters);
+    setScheduledTasks(updatedSchedules);
+    setDepartments(storage.getDepartments());
+    setUsers(storage.getUsers());
+    setChecklistTemplates(storage.getChecklistTemplates());
+    setSettings(currentSettings);
+    setNotifications(storage.getNotifications());
+    setAuditLogs(storage.getAuditLogs());
+  };
+
+  const clearAllData = () => {
+    storage.clearAllTaskData();
+    loadAll();
+  };
+
+  useEffect(() => {
+    loadAll();
+  }, []);
+
+  useEffect(() => {
+    setScheduledTasks((prev) => {
+      const adv = settings.taskAdvanceVisibilityDays || 5;
+      return updateDynamicStatuses(prev, adv, todayStr);
+    });
+  }, [todayStr, settings.taskAdvanceVisibilityDays]);
 
   // Add Task Master
   const addTaskMaster = (data: Omit<TaskMaster, 'id' | 'createdAt' | 'updatedAt' | 'createdBy'>) => {
@@ -930,7 +941,7 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <TaskContext.Provider
       value={{
         taskMasters,
-        scheduledTasks: updateDynamicStatuses(scheduledTasks, settings.taskAdvanceVisibilityDays),
+        scheduledTasks: updateDynamicStatuses(scheduledTasks, settings.taskAdvanceVisibilityDays || 5, todayStr),
         departments,
         users,
         checklistTemplates,

@@ -7,7 +7,9 @@ import { ChangePasswordModal } from './components/modals/ChangePasswordModal';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { TaskProvider, useTasks } from './context/TaskContext';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
+import { AuditLogsPage } from './pages/admin/AuditLogsPage';
 import { ChecklistsPage } from './pages/admin/ChecklistsPage';
+import { DepartmentsPage } from './pages/admin/DepartmentsPage';
 import { MasterSchedulePage } from './pages/admin/MasterSchedulePage';
 import { ReportsPage } from './pages/admin/ReportsPage';
 import { SchedulerEnginePage } from './pages/admin/SchedulerEnginePage';
@@ -17,6 +19,7 @@ import { TaskManagementPage } from './pages/admin/TaskManagementPage';
 import { UserManagementPage } from './pages/admin/UserManagementPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { DoneTasksPage } from './pages/shared/DoneTasksPage';
+import { MachineHistoryPage } from './pages/shared/MachineHistoryPage';
 import { MyTasksPage } from './pages/user/MyTasksPage';
 import { UserDashboard } from './pages/user/UserDashboard';
 
@@ -78,21 +81,33 @@ const MainLayout: React.FC = () => {
 
       case 'due-today':
         return isAdmin ? (
-          <MasterSchedulePage />
+          <MasterSchedulePage
+            initialFilter="due_today"
+            title="Today's Maintenance Tasks"
+            subtitle="Preventive maintenance schedules strictly due today for verification."
+          />
         ) : (
           <MyTasksPage filterType="due_today" />
         );
 
       case 'upcoming':
         return isAdmin ? (
-          <MasterSchedulePage />
+          <MasterSchedulePage
+            initialFilter="upcoming"
+            title="Upcoming Maintenance Tasks"
+            subtitle="Scheduled preventive machine maintenance tasks upcoming in the active horizon."
+          />
         ) : (
           <MyTasksPage filterType="upcoming" />
         );
 
       case 'overdue':
         return isAdmin ? (
-          <MasterSchedulePage />
+          <MasterSchedulePage
+            initialFilter="overdue"
+            title="Overdue Maintenance Tasks"
+            subtitle="Critical delayed machine maintenance tasks requiring immediate technical intervention and audit."
+          />
         ) : (
           <MyTasksPage filterType="overdue" />
         );
@@ -101,8 +116,10 @@ const MainLayout: React.FC = () => {
         return <TaskManagementPage onOpenImport={() => setIsBulkImportOpen(true)} />;
 
       case 'master-schedule':
+        return <MasterSchedulePage initialFilter="all" />;
+
       case 'machine-history':
-        return <MasterSchedulePage />;
+        return <MachineHistoryPage />;
 
       case 'done':
         return <DoneTasksPage />;
@@ -122,13 +139,15 @@ const MainLayout: React.FC = () => {
         return <ChecklistsPage />;
 
       case 'departments':
-        return <TaskManagementPage onOpenImport={() => setIsBulkImportOpen(true)} />;
+        return <DepartmentsPage />;
 
       case 'reports':
         return <ReportsPage />;
 
-      case 'settings':
       case 'audit-logs':
+        return <AuditLogsPage />;
+
+      case 'settings':
         return <SettingsPage />;
 
       default:

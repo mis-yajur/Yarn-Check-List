@@ -147,28 +147,38 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateDynamicStatuses = (tasks: ScheduledTask[], advanceDays: number, currentToday: string): ScheduledTask[] => {
     return tasks.map((task) => {
-      // If already completed or cancelled/suspended, keep as is
+      // If task has genuine completion (valid completedAt timestamp exists)
       if (
-        task.status === 'completed_early' ||
-        task.status === 'completed_on_time' ||
-        task.status === 'completed_late' ||
-        task.status === 'cancelled' ||
-        task.status === 'suspended'
+        (task.status === 'completed_early' ||
+          task.status === 'completed_on_time' ||
+          task.status === 'completed_late') &&
+        task.completedAt
       ) {
         return task;
       }
 
+      // If task is cancelled or suspended, maintain state
+      if (task.status === 'cancelled' || task.status === 'suspended') {
+        return task;
+      }
+
+      // If task was previously flagged completed without completedAt evidence, or is an open task,
+      // dynamically assign strict status based on date passing rules:
       const dueDate = task.dueDate;
       const visDate = task.visibilityDate || calculateVisibilityDate(dueDate, advanceDays);
 
       if (dueDate < currentToday) {
-        return { ...task, status: 'overdue' };
+        // Past uncompleted task => Overdue / Missed (Never marked as Done!)
+        return { ...task, status: 'overdue' as const };
       } else if (dueDate === currentToday) {
-        return { ...task, status: 'due_today' };
+        // Today's uncompleted task => Due Today (Pending)
+        return { ...task, status: 'due_today' as const };
       } else if (visDate <= currentToday) {
-        return { ...task, status: 'available' };
+        // Upcoming task within visibility window => Available (Pending/Scheduled)
+        return { ...task, status: 'available' as const };
       } else {
-        return { ...task, status: 'future' };
+        // Future task beyond visibility window => Future (Pending/Scheduled)
+        return { ...task, status: 'future' as const };
       }
     });
   };
@@ -465,6 +475,15 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     const task = scheduledTasks[taskIndex];
+
+    // Authorization check: Only assigned user or an Admin can mark a task as Done
+    if (currentUser && currentUser.role !== 'admin' && task.assignedUserId !== currentUser.id) {
+      return {
+        success: false,
+        message: 'Permission denied. Only the assigned user or an Administrator can complete this task.',
+      };
+    }
+
     const completionDate = data.overrideCompletionDate || todayStr;
     const nowIso = new Date().toISOString();
     const timeStr = format(new Date(), 'HH:mm:ss');
@@ -481,6 +500,9 @@ export const TaskProvider: React.FC<{ children: React.ReactNode }> = ({ children
       completedAt: nowIso,
       completedDate: completionDate,
       completedTime: timeStr,
+      completedByUserId: currentUser?.id || task.assignedUserId,
+      completedByUserName: currentUser?.name || task.assignedUserName,
+      completedByUserRole: currentUser?.role || 'doer',
       completionClassification: evalResult.classification,
       delayDays: evalResult.delayDays,
       score: evalResult.score,

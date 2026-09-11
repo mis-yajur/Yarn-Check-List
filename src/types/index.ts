@@ -162,6 +162,9 @@ export interface ScheduledTask {
   completedAt?: string; // ISO string
   completedDate?: string; // YYYY-MM-DD
   completedTime?: string; // HH:mm:ss
+  completedByUserId?: string;
+  completedByUserName?: string;
+  completedByUserRole?: UserRole;
   completionClassification?: CompletionClassification;
   delayDays?: number;
   score?: number;

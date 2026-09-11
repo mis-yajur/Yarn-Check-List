@@ -11,6 +11,7 @@ import {
   ListTodo,
   TrendingUp,
 } from 'lucide-react';
+import { addDays, format, parseISO } from 'date-fns';
 import { MarkTaskDoneModal } from '../../components/modals/MarkTaskDoneModal';
 import { useAuth } from '../../context/AuthContext';
 import { useTasks } from '../../context/TaskContext';
@@ -32,12 +33,27 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
   // Visibility window: today through today + advance visibility days (default 5 days)
   const advanceDays = settings.taskAdvanceVisibilityDays || 5;
 
-  const myDueToday = myAllTasks.filter((s) => s.status === 'due_today');
-  const myOverdue = myAllTasks.filter((s) => s.status === 'overdue');
-  const myAvailableNext5Days = myAllTasks.filter(
-    (s) => s.status === 'available' || (s.status === 'due_today')
+  const fiveDaysLaterStr = React.useMemo(() => {
+    try {
+      return format(addDays(parseISO(todayStr), advanceDays), 'yyyy-MM-dd');
+    } catch {
+      return todayStr;
+    }
+  }, [todayStr, advanceDays]);
+
+  const myDueToday = myAllTasks.filter(
+    (s) => s.dueDate === todayStr && !s.status.startsWith('completed') && s.status !== 'cancelled'
   );
-  const myCompleted = myAllTasks.filter((s) => s.status.startsWith('completed'));
+  const myOverdue = myAllTasks.filter(
+    (s) => s.dueDate < todayStr && !s.status.startsWith('completed') && s.status !== 'cancelled'
+  );
+  const myUpcomingAndPending = myAllTasks.filter((s) => {
+    if (s.status.startsWith('completed') || s.status === 'cancelled') return false;
+    const isPastPending = s.dueDate < todayStr;
+    const isTodayOrNext5Days = s.dueDate >= todayStr && s.dueDate <= fiveDaysLaterStr;
+    return isPastPending || isTodayOrNext5Days;
+  });
+  const myCompleted = myAllTasks.filter((s) => s.status.startsWith('completed') && Boolean(s.completedAt));
 
   const scorecard = calculateScorecard(
     myAllTasks,
@@ -69,10 +85,10 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
         <div className="flex items-center gap-3">
           <button
             onClick={() => onNavigate('my-tasks')}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition-colors"
+            className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-4 py-2 text-xs font-bold text-white shadow-xs hover:bg-emerald-800 transition-colors cursor-pointer"
           >
             <ListTodo className="h-4 w-4" />
-            Open My Active Tasks ({myDueToday.length + myAvailableNext5Days.length})
+            Open My Active Tasks ({myDueToday.length + myUpcomingAndPending.length})
           </button>
         </div>
       </div>
@@ -90,11 +106,11 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
 
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-2xs">
           <div className="flex items-center justify-between text-slate-700">
-            <span className="text-xs font-semibold">Next 5 Days</span>
+            <span className="text-xs font-semibold">Next {advanceDays} Days</span>
             <Calendar className="h-4 w-4 text-slate-400" />
           </div>
-          <p className="mt-2 text-2xl font-black text-slate-900">{myAvailableNext5Days.length}</p>
-          <span className="text-[10px] text-slate-700">Advance window</span>
+          <p className="mt-2 text-2xl font-black text-slate-900">{myUpcomingAndPending.length}</p>
+          <span className="text-[10px] text-slate-700">Upcoming &amp; Pending</span>
         </div>
 
         <div className="rounded-xl border border-red-200 bg-red-50/60 p-4 shadow-2xs">
@@ -213,55 +229,77 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({ onNavigate }) => {
         </div>
       </div>
 
-      {/* Upcoming Tasks in Advance Window (Next 5 Days) */}
+      {/* Upcoming Tasks (Today + Next 5 Days + Previous Pending Tasks) */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-xs">
         <div className="flex items-center justify-between border-b border-slate-100 pb-3">
           <div className="flex items-center gap-2">
             <Calendar className="h-4 w-4 text-emerald-800" />
             <h2 className="text-sm font-bold text-slate-900">
-              Upcoming Tasks Within Allowed Window (Next {advanceDays} Days)
+              Upcoming &amp; Pending Tasks Horizon (Today + Next {advanceDays} Days + Previous Pending)
             </h2>
           </div>
           <button
             onClick={() => onNavigate('my-tasks')}
-            className="text-xs font-bold text-emerald-800 hover:underline"
+            className="text-xs font-bold text-emerald-800 hover:underline cursor-pointer"
           >
-            View All My Tasks
+            View All My Tasks ({myAllTasks.length})
           </button>
         </div>
 
         <div className="mt-3 divide-y divide-slate-100">
-          {myAvailableNext5Days.length === 0 ? (
+          {myUpcomingAndPending.length === 0 ? (
             <p className="py-6 text-center text-xs text-slate-600">
-              No tasks scheduled within the next {advanceDays} days.
+              No pending tasks scheduled within the next {advanceDays} days or overdue queue.
             </p>
           ) : (
-            myAvailableNext5Days.slice(0, 6).map((task) => (
-              <div key={task.id} className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-slate-700">{task.taskCode}</span>
-                    <span className="text-xs font-bold text-slate-900">{task.taskName}</span>
-                    <span className="text-[10px] text-slate-700 font-medium">Due: {task.dueDate}</span>
-                  </div>
-                  <p className="text-[11px] text-slate-700 mt-0.5">
-                    {task.checklistName} ({task.departmentName})
-                  </p>
-                </div>
+            myUpcomingAndPending.slice(0, 8).map((task) => {
+              const isPast = task.dueDate < todayStr;
+              const isToday = task.dueDate === todayStr;
 
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-medium text-slate-700">
-                    {task.dueDate === todayStr ? 'Today' : task.dueDate}
-                  </span>
-                  <button
-                    onClick={() => setSelectedTaskForDone(task)}
-                    className="rounded-lg border border-emerald-600 px-3 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-50"
-                  >
-                    Complete
-                  </button>
+              return (
+                <div key={task.id} className="py-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">
+                        {task.taskCode}
+                      </span>
+                      <span className="text-xs font-bold text-slate-900">{task.taskName}</span>
+                      {isPast && (
+                        <span className="rounded-full bg-rose-100 px-2 py-0.2 text-[10px] font-bold text-rose-800 border border-rose-200">
+                          Previous Pending (Overdue)
+                        </span>
+                      )}
+                      {isToday && (
+                        <span className="rounded-full bg-blue-100 px-2 py-0.2 text-[10px] font-bold text-blue-800 border border-blue-200">
+                          Due Today
+                        </span>
+                      )}
+                      {!isPast && !isToday && (
+                        <span className="rounded-full bg-slate-100 px-2 py-0.2 text-[10px] font-semibold text-slate-700">
+                          Due in next {advanceDays}D
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[11px] text-slate-600 mt-0.5">
+                      Checklist: <span className="font-medium text-slate-800">{task.checklistName}</span> • Department: {task.departmentName}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-mono text-xs font-bold text-slate-700">
+                      {task.dueDate}
+                    </span>
+                    <button
+                      onClick={() => setSelectedTaskForDone(task)}
+                      className="flex items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 transition-colors shadow-2xs cursor-pointer"
+                    >
+                      <FileCheck2 className="h-3.5 w-3.5" />
+                      Mark as Done
+                    </button>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
